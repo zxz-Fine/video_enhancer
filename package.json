@@ -1,0 +1,25 @@
+{
+  "name": "video-enhancer",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "test:unit": "node tests/easu-ordering.test.mjs",
+    "test:e2e": "node tests/e2e.mjs"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-basic-ssl": "^2.3.0",
+    "@webgpu/types": "^0.1.72",
+    "playwright-core": "^1.62.1",
+    "typescript": "~6.0.2",
+    "vite": "^8.2.2",
+    "wgsl_reflect": "^1.5.0"
+  },
+  "dependencies": {
+    "mediabunny": "^1.55.2",
+    "onnxruntime-web": "^1.29.0"
+  }
+}

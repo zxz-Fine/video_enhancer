@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>本地视频画质增强器 — WebGPU</title>
+    <style>
+      :root {
+        --bg: #101418;
+        --panel: #1a2027;
+        --border: #2a333d;
+        --accent: #4f9cf9;
+        --text: #e6ebf0;
+        --muted: #8a97a5;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        min-height: 100vh;
+      }
+      .container { max-width: 960px; margin: 0 auto; padding: 32px 16px 64px; }
+      h1 { font-size: 1.6rem; margin: 0 0 8px; }
+      .subtitle { color: var(--muted); margin: 0 0 24px; font-size: 0.95rem; }
+
+      #drop-zone {
+        border: 2px dashed var(--border);
+        border-radius: 12px;
+        padding: 48px 24px;
+        text-align: center;
+        cursor: pointer;
+        transition: all 0.15s;
+        background: var(--panel);
+      }
+      #drop-zone.dragover { border-color: var(--accent); background: #20304a; }
+      #drop-zone .icon { font-size: 2rem; display: block; margin-bottom: 8px; }
+      #file-meta { margin: 16px 0 0; color: var(--muted); font-size: 0.9rem; word-break: break-all; }
+
+      #controls { display: none; margin-top: 20px; padding: 20px; background: var(--panel); border-radius: 12px; }
+      .control-row { display: flex; flex-wrap: wrap; gap: 24px; align-items: center; margin-bottom: 18px; }
+      .control-group label.group-label { display: block; font-size: 0.85rem; color: var(--muted); margin-bottom: 6px; }
+      .radio-group { display: flex; gap: 8px; }
+      .radio-group label {
+        padding: 8px 14px; border: 1px solid var(--border); border-radius: 8px;
+        cursor: pointer; font-size: 0.9rem; user-select: none;
+      }
+      .radio-group input { display: none; }
+      .radio-group input:checked + span { color: var(--accent); font-weight: 600; }
+      .radio-group label:has(input:checked) { border-color: var(--accent); background: #1c2b42; }
+      .radio-group label small { display: block; color: var(--muted); font-size: 0.72rem; }
+
+      input[type='range'] { width: 220px; accent-color: var(--accent); }
+      #sharpness-value { color: var(--accent); font-variant-numeric: tabular-nums; }
+
+      .btn-row { display: flex; gap: 12px; }
+      button {
+        padding: 10px 22px; border: none; border-radius: 8px; font-size: 0.95rem;
+        cursor: pointer; font-family: inherit;
+      }
+      button:disabled { opacity: 0.45; cursor: not-allowed; }
+      #start-btn { background: var(--accent); color: #fff; font-weight: 600; }
+      #cancel-btn { background: transparent; color: var(--text); border: 1px solid var(--border); }
+
+      #progress-wrap { display: none; margin-top: 20px; }
+      .badge-row { display: flex; gap: 10px; margin-bottom: 10px; }
+      .badge {
+        padding: 6px 14px; border-radius: 20px; font-size: 0.85rem; font-weight: 600;
+        display: inline-flex; align-items: center; gap: 6px;
+      }
+      .badge.none { background: var(--border); color: var(--muted); }
+      .badge.gpu { background: #12321f; color: #5fe39a; border: 1px solid #1f5c3a; }
+      .badge.cpu { background: #3a2520; color: #ffb36b; border: 1px solid #7a5530; }
+      .badge.model { background: #1c2b42; color: #7cc4ff; border: 1px solid #2b4a73; }
+      .progress-track { height: 10px; background: var(--border); border-radius: 5px; overflow: hidden; }
+      #progress-bar { height: 100%; width: 0%; background: linear-gradient(90deg, #4f9cf9, #7cc4ff); transition: width 0.2s; }
+      #status-text { margin-top: 8px; color: var(--muted); font-size: 0.9rem; }
+
+      #log-toggle {
+        margin-top: 12px; padding: 4px 12px; font-size: 0.8rem;
+        background: transparent; color: var(--muted); border: 1px solid var(--border); border-radius: 6px;
+      }
+      #log-panel {
+        display: none; margin-top: 8px; padding: 10px; height: 220px; overflow-y: auto;
+        background: #0b0e12; border: 1px solid var(--border); border-radius: 8px;
+        font-family: 'Consolas', 'Menlo', monospace; font-size: 0.75rem; line-height: 1.5;
+      }
+      #log-panel.open { display: block; }
+      #log-panel .lg-time { color: #55606c; margin-right: 8px; }
+      #log-panel .lg-info { color: #9fb0c0; }
+      #log-panel .lg-gpu { color: #5fe39a; }
+      #log-panel .lg-ai { color: #7cc4ff; }
+      #log-panel .lg-warn { color: #ffb36b; }
+      #log-panel .lg-error { color: #ff8a94; }
+
+      #error-box {
+        display: none; margin-top: 20px; padding: 12px 16px;
+        background: #3a1d20; border: 1px solid #7a3038; border-radius: 8px;
+        color: #ffb4ba; font-size: 0.92rem;
+      }
+
+      #result-section { display: none; margin-top: 28px; }
+      #result-info { color: var(--muted); font-size: 0.9rem; margin-bottom: 14px; }
+      .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+      .compare .cell video { width: 100%; border-radius: 8px; background: #000; max-height: 420px; }
+      .compare .cell .cap { font-size: 0.85rem; color: var(--muted); margin-bottom: 6px; }
+      #download-link {
+        display: inline-block; margin-top: 18px; padding: 11px 26px;
+        background: var(--accent); color: #fff; text-decoration: none;
+        border-radius: 8px; font-weight: 600;
+      }
+      @media (max-width: 640px) { .compare { grid-template-columns: 1fr; } }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>本地视频画质增强器</h1>
+      <p class="subtitle">WebGPU 加速 · CAS 锐化（原分辨率）/ FSR 超分（2x/4x）· 全程本地处理，文件不上传</p>
+
+      <div id="drop-zone">
+        <span class="icon">🎬</span>
+        点击选择或拖入视频文件<br />
+        <small style="color: var(--muted)">支持 MP4 / MOV / MKV / WEBM 等浏览器可解码格式</small>
+      </div>
+      <input id="file-input" type="file" accept="video/*" style="display: none" />
+      <p id="file-meta"></p>
+
+      <div id="controls">
+        <div class="control-row">
+          <div class="control-group">
+            <label class="group-label">处理引擎</label>
+            <div class="radio-group" id="engine-group">
+              <label>
+                <input type="radio" name="engine" value="fsr" checked /><span
+                  >算法增强<small>CAS 锐化 / FSR 超分 · 不缩放可选</small></span
+                >
+              </label>
+              <label>
+                <input type="radio" name="engine" value="imdn-x2" /><span
+                  >AI · 极速增强<small>通用 · 2x · 0.4MB · 实时级速度</small></span
+                >
+              </label>
+              <label>
+                <input type="radio" name="engine" value="realesr-general-x4v3" /><span
+                  >AI · 通用 4x<small>真人/实拍 · 4.9MB · 低清实拍首选</small></span
+                >
+              </label>
+              <label>
+                <input type="radio" name="engine" value="realesrgan-anime6b-x4" /><span
+                  >AI · 动漫增强<small>动漫/手绘 · 4x · 17.5MB · 细节最强</small></span
+                >
+              </label>
+            </div>
+          </div>
+        </div>
+        <div class="control-row">
+          <div class="control-group" id="scale-group">
+            <label class="group-label">处理模式</label>
+            <div class="radio-group">
+              <label>
+                <input type="radio" name="scale" value="1" checked /><span
+                  >保持原分辨率<small>CAS 锐化修复</small></span
+                >
+              </label>
+              <label>
+                <input type="radio" name="scale" value="2" /><span>2x<small>FSR 超分</small></span>
+              </label>
+              <label>
+                <input type="radio" name="scale" value="4" /><span>4x<small>FSR 两级超分</small></span>
+              </label>
+            </div>
+          </div>
+          <div class="control-group">
+            <label class="group-label">锐化强度：<span id="sharpness-value">60%</span></label>
+            <input id="sharpness" type="range" min="0" max="100" value="60" />
+            <small id="ai-note" style="display: none; color: var(--muted)"
+              >AI 引擎自带放大倍数与锐化，强度滑条不生效</small
+            >
+            <div id="ai-keep-res-row" style="display: none; margin-top: 8px">
+              <label style="font-size: 0.85rem; cursor: pointer; user-select: none">
+                <input id="ai-keep-res" type="checkbox" />
+                保持原分辨率（AI 修复，不放大 · 编码更快）
+              </label>
+              <br />
+              <label style="font-size: 0.85rem; cursor: pointer; user-select: none">
+                <input id="ai-half-input" type="checkbox" />
+                性能模式（半分辨率推理 · 快约 4 倍 · 画质略降）
+              </label>
+            </div>
+          </div>
+        </div>
+        <div class="btn-row">
+          <button id="start-btn">开始处理</button>
+          <button id="cancel-btn" disabled>取消</button>
+        </div>
+      </div>
+
+      <div id="progress-wrap">
+        <div class="badge-row">
+          <span id="compute-badge" class="badge none">处理引擎状态</span>
+          <span id="engine-badge" class="badge none"></span>
+        </div>
+        <div class="progress-track"><div id="progress-bar"></div></div>
+        <div id="status-text"></div>
+        <button id="log-toggle" type="button">▼ 运行日志</button>
+        <div id="log-panel"></div>
+      </div>
+
+      <div id="error-box"></div>
+
+      <div id="result-section">
+        <div class="compare">
+          <div class="cell">
+            <div class="cap">原始视频</div>
+            <video id="original-video" controls muted></video>
+          </div>
+          <div class="cell">
+            <div class="cap">增强后</div>
+            <video id="enhanced-video" controls muted></video>
+          </div>
+        </div>
+        <p id="result-info"></p>
+        <a id="download-link" download>下载增强后的 MP4</a>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
