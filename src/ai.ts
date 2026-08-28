@@ -183,25 +183,16 @@ export class AiEngine {
     const img = ctx.getImageData(0, 0, w, h);
 
     const useTile = w > this.tile || h > this.tile;
-    const rawOutW = w * this.model.scale;
-    const rawOutH = h * this.model.scale;
-    const rawCanvas = new OffscreenCanvas(rawOutW, rawOutH);
-    const octx = rawCanvas.getContext('2d')!;
-    const outCanvas =
-      runOpts?.keepResolution && (rawOutW !== src.width || rawOutH !== src.height)
-        ? new OffscreenCanvas(src.width, src.height)
-        : rawCanvas;
-    const outW = outCanvas.width;
-    const outH = outCanvas.height;
+    const targetW = runOpts?.keepResolution ? src.width : w * this.model.scale;
+    const targetH = runOpts?.keepResolution ? src.height : h * this.model.scale;
+    const finalRgba = new Uint8ClampedArray(targetW * targetH * 4);
 
     if (!useTile) {
       const out = await this.inferTensor(img.data, w, h);
-      const rgba = this.chwToRgba(out, rawOutW, rawOutH);
-      const raw = new OffscreenCanvas(rawOutW, rawOutH);
-      raw.getContext('2d')!.putImageData(new ImageData(rgba, rawOutW, rawOutH), 0, 0);
-      if (outCanvas !== raw) {
-        outCanvas.getContext('2d')!.drawImage(raw, 0, 0, outW, outH);
-      }
+      const rgba = this.chwToRgba(out.data, out.w, out.h);
+      blitScaled(rgba, out.w, out.h, finalRgba, targetW, 0, 0, out.w, out.h, 0, 0);
+      const outCanvas = new OffscreenCanvas(targetW, targetH);
+      outCanvas.getContext('2d')!.putImageData(new ImageData(finalRgba, targetW, targetH), 0, 0);
       return outCanvas;
     }
 
@@ -223,37 +214,40 @@ export class AiEngine {
           patch.set(img.data.subarray(srcRow, srcRow + tw * 4), row * tw * 4);
         }
         const outTile = await this.inferTensor(patch, tw, th);
-        const oTw = tw * tileScale;
-        const oTh = th * tileScale;
+        const fx = outTile.w / (tw * tileScale);
+        const fy = outTile.h / (th * tileScale);
 
         const cx0 = Math.max(x, sx + ov) * tileScale;
         const cy0 = Math.max(y, sy + ov) * tileScale;
         const cx1 = Math.min(ex, x + this.tile - ov) * tileScale;
         const cy1 = Math.min(ey, y + this.tile - ov) * tileScale;
 
-        const tmp = new OffscreenCanvas(oTw, oTh);
-        const tileRgba = this.chwToRgba(outTile, oTw, oTh);
-        tmp.getContext('2d')!.putImageData(new ImageData(tileRgba, oTw, oTh), 0, 0);
-        octx.drawImage(
-          tmp,
-          cx0 - sx * tileScale,
-          cy0 - sy * tileScale,
-          cx1 - cx0,
-          cy1 - cy0,
+        const tileRgba = this.chwToRgba(outTile.data, outTile.w, outTile.h);
+        blitScaled(
+          tileRgba,
+          outTile.w,
+          outTile.h,
+          finalRgba,
+          targetW,
+          (cx0 - sx * tileScale) * fx,
+          (cy0 - sy * tileScale) * fy,
+          (cx1 - cx0) * fx,
+          (cy1 - cy0) * fy,
           cx0,
           cy0,
-          cx1 - cx0,
-          cy1 - cy0,
         );
       }
     }
-    if (outCanvas !== rawCanvas) {
-      outCanvas.getContext('2d')!.drawImage(rawCanvas, 0, 0, outW, outH);
-    }
+    const outCanvas = new OffscreenCanvas(targetW, targetH);
+    outCanvas.getContext('2d')!.putImageData(new ImageData(finalRgba, targetW, targetH), 0, 0);
     return outCanvas;
   }
 
-  private async inferTensor(rgba: Uint8ClampedArray, w: number, h: number): Promise<Float32Array> {
+  private async inferTensor(
+    rgba: Uint8ClampedArray,
+    w: number,
+    h: number,
+  ): Promise<{ data: Float32Array; w: number; h: number }> {
     const k = this.model.inputRange === 255 ? 1 : 1 / 255;
     const chw = new Float32Array(3 * w * h);
     const px = w * h;
@@ -266,7 +260,7 @@ export class AiEngine {
     const feeds: Record<string, ort.Tensor> = { [this.inputName]: input };
     const results = await this.session!.run(feeds);
     const t = results[this.outputName];
-    return t.data as Float32Array;
+    return { data: t.data as Float32Array, w: t.dims[3], h: t.dims[2] };
   }
 
   private chwToRgba(data: Float32Array, w: number, h: number): Uint8ClampedArray<ArrayBuffer> {
@@ -292,6 +286,34 @@ function toByte(v: number, range: number): number {
   if (v <= 0) return 0;
   if (v >= range) return 255;
   return (v / range) * 255;
+}
+
+function blitScaled(
+  src: Uint8ClampedArray,
+  sw: number,
+  sh: number,
+  dst: Uint8ClampedArray,
+  dW: number,
+  rx: number,
+  ry: number,
+  rw: number,
+  rh: number,
+  dx: number,
+  dy: number,
+): void {
+  for (let y = 0; y < rh; y++) {
+    const syy = Math.min(sh - 1, Math.floor(ry + (y + 0.5) * (sh / rh)));
+    let di = ((dy + y) * dW + dx) * 4;
+    for (let x = 0; x < rw; x++) {
+      const sxx = Math.min(sw - 1, Math.floor(rx + (x + 0.5) * (sw / rw)));
+      const si = (syy * sw + sxx) * 4;
+      dst[di] = src[si];
+      dst[di + 1] = src[si + 1];
+      dst[di + 2] = src[si + 2];
+      dst[di + 3] = 255;
+      di += 4;
+    }
+  }
 }
 
 export async function listCachedModels(): Promise<Record<string, boolean>> {

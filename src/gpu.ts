@@ -117,6 +117,7 @@ export class FrameEnhancer {
         usage:
           GPUTextureUsage.TEXTURE_BINDING |
           GPUTextureUsage.COPY_DST |
+          GPUTextureUsage.COPY_SRC |
           GPUTextureUsage.RENDER_ATTACHMENT,
       });
       this.textures.set(key, tex);
@@ -204,17 +205,63 @@ export class FrameEnhancer {
     return f;
   }
 
+  private uploadMode: 'external' | 'writeTexture' | null = null;
+
+  private async uploadAndVerify(
+    source: OffscreenCanvas,
+    srcTex: GPUTexture,
+    w: number,
+    h: number,
+  ): Promise<void> {
+    if (this.uploadMode === 'writeTexture') {
+      const img = source.getContext('2d')!.getImageData(0, 0, w, h);
+      this.device.queue.writeTexture(
+        { texture: srcTex },
+        img.data,
+        { bytesPerRow: w * 4, rowsPerImage: h },
+        [w, h],
+      );
+      return;
+    }
+    this.device.queue.copyExternalImageToTexture(
+      { source },
+      { texture: srcTex },
+      [w, h],
+    );
+    if (this.uploadMode === null) {
+      this.uploadMode = 'external';
+      const readBuf = this.device.createBuffer({
+        size: 256,
+        usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+      });
+      const enc = this.device.createCommandEncoder();
+      enc.copyTextureToBuffer(
+        { texture: srcTex, origin: [Math.floor(w / 2), Math.floor(h / 2)] },
+        { buffer: readBuf, bytesPerRow: 256 },
+        [1, 1],
+      );
+      this.device.queue.submit([enc.finish()]);
+      await readBuf.mapAsync(GPUMapMode.READ);
+      const px = new Uint8Array(readBuf.getMappedRange());
+      const sum = px[0] + px[1] + px[2];
+      readBuf.unmap();
+      readBuf.destroy();
+      if (sum === 0) {
+        this.uploadMode = 'writeTexture';
+        log('warn', 'copyExternalImageToTexture 上传为黑帧 → 切换 CPU 直写纹理通道');
+      } else {
+        log('gpu', `纹理上传通路正常 (探针 ${px[0]},${px[1]},${px[2]})`);
+      }
+    }
+  }
+
   async processFrame(source: OffscreenCanvas, options: FrameEnhancerOptions): Promise<OffscreenCanvas> {
     const inW = source.width;
     const inH = source.height;
 
     const srcKey = `src-${inW}x${inH}`;
     const srcTex = this.getSourceTexture(inW, inH);
-    this.device.queue.copyExternalImageToTexture(
-      { source },
-      { texture: srcTex },
-      [inW, inH],
-    );
+    await this.uploadAndVerify(source, srcTex, inW, inH);
 
     let curKey = srcKey;
     let curTex = srcTex;
@@ -299,7 +346,11 @@ export class FrameEnhancer {
       lumaSum += packed[i] + packed[i + 1] + packed[i + 2];
     }
     if (lumaSum === 0 && curW > 0 && !options.allowBlackFrames) {
-      throw new Error('GPU 输出为全黑帧（纹理通路异常），已中止。请把此错误报告给开发者。');
+      throw new Error(
+        this.uploadMode === 'writeTexture'
+          ? 'CPU 直写后输出仍为全黑：解码出的视频帧本身是黑帧，请用其他播放器确认该视频是否正常。'
+          : 'GPU 输出全黑且探针未拦截，请把日志面板内容报告给开发者。',
+      );
     }
 
     const canvas = new OffscreenCanvas(curW, curH);

@@ -5,6 +5,7 @@ const server = await createServer({ configFile: false, root: process.cwd(), serv
 await server.listen();
 const browser = await chromium.launch({ executablePath: exe, headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage'] });
 const page = await browser.newPage();
+page.on('console', (m) => console.log('[console]', m.text().slice(0, 180)));
 page.on('console', (m) => {
   if (m.text().includes('[probe]')) console.log(m.text());
 });
