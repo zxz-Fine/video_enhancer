@@ -301,15 +301,38 @@ function blitScaled(
   dx: number,
   dy: number,
 ): void {
+  const xRatio = sw / rw;
+  const yRatio = sh / rh;
   for (let y = 0; y < rh; y++) {
-    const syy = Math.min(sh - 1, Math.floor(ry + (y + 0.5) * (sh / rh)));
+    const fy = ry + (y + 0.5) * yRatio - 0.5;
+    let y0 = Math.floor(fy);
+    const wy = fy - y0;
+    if (y0 < 0) y0 = 0;
+    if (y0 >= sh) y0 = sh - 1;
+    let y1 = y0 + 1;
+    if (y1 >= sh) y1 = sh - 1;
+    const rowA = y0 * sw;
+    const rowB = y1 * sw;
     let di = ((dy + y) * dW + dx) * 4;
     for (let x = 0; x < rw; x++) {
-      const sxx = Math.min(sw - 1, Math.floor(rx + (x + 0.5) * (sw / rw)));
-      const si = (syy * sw + sxx) * 4;
-      dst[di] = src[si];
-      dst[di + 1] = src[si + 1];
-      dst[di + 2] = src[si + 2];
+      const fx = rx + (x + 0.5) * xRatio - 0.5;
+      let x0 = Math.floor(fx);
+      const wx = fx - x0;
+      if (x0 < 0) x0 = 0;
+      if (x0 >= sw) x0 = sw - 1;
+      let x1 = x0 + 1;
+      if (x1 >= sw) x1 = sw - 1;
+      const i00 = (rowA + x0) * 4;
+      const i10 = (rowA + x1) * 4;
+      const i01 = (rowB + x0) * 4;
+      const i11 = (rowB + x1) * 4;
+      const w00 = (1 - wx) * (1 - wy);
+      const w10 = wx * (1 - wy);
+      const w01 = (1 - wx) * wy;
+      const w11 = wx * wy;
+      dst[di] = src[i00] * w00 + src[i10] * w10 + src[i01] * w01 + src[i11] * w11;
+      dst[di + 1] = src[i00 + 1] * w00 + src[i10 + 1] * w10 + src[i01 + 1] * w01 + src[i11 + 1] * w11;
+      dst[di + 2] = src[i00 + 2] * w00 + src[i10 + 2] * w10 + src[i01 + 2] * w01 + src[i11 + 2] * w11;
       dst[di + 3] = 255;
       di += 4;
     }
