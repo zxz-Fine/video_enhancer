@@ -21,7 +21,7 @@ export class AiEngine {
   private model: ModelInfo;
   private inputName: string;
   private outputName: string;
-  private tile = 512;
+  private tile = 768;
   private _ep: 'webgpu' | 'wasm' = 'wasm';
 
   private constructor(session: ort.InferenceSession, model: ModelInfo, ep: 'webgpu' | 'wasm') {
@@ -185,16 +185,25 @@ export class AiEngine {
     const useTile = w > this.tile || h > this.tile;
     const targetW = runOpts?.keepResolution ? src.width : w * this.model.scale;
     const targetH = runOpts?.keepResolution ? src.height : h * this.model.scale;
-    const finalRgba = new Uint8ClampedArray(targetW * targetH * 4);
 
     if (!useTile) {
       const out = await this.inferTensor(img.data, w, h);
       const rgba = this.chwToRgba(out.data, out.w, out.h);
-      blitScaled(rgba, out.w, out.h, finalRgba, targetW, 0, 0, out.w, out.h, 0, 0);
       const outCanvas = new OffscreenCanvas(targetW, targetH);
-      outCanvas.getContext('2d')!.putImageData(new ImageData(finalRgba, targetW, targetH), 0, 0);
+      const octx = outCanvas.getContext('2d')!;
+      if (out.w === targetW && out.h === targetH) {
+        octx.putImageData(new ImageData(rgba, out.w, out.h), 0, 0);
+      } else {
+        const tmp = new OffscreenCanvas(out.w, out.h);
+        tmp.getContext('2d')!.putImageData(new ImageData(rgba, out.w, out.h), 0, 0);
+        octx.imageSmoothingEnabled = true;
+        octx.drawImage(tmp, 0, 0, targetW, targetH);
+      }
       return outCanvas;
     }
+
+    const sum = new Float32Array(targetW * targetH * 3);
+    const wsum = new Float32Array(targetW * targetH);
 
     const ov = 16;
     const tileScale = this.model.scale;
@@ -214,31 +223,51 @@ export class AiEngine {
           patch.set(img.data.subarray(srcRow, srcRow + tw * 4), row * tw * 4);
         }
         const outTile = await this.inferTensor(patch, tw, th);
-        const fx = outTile.w / (tw * tileScale);
-        const fy = outTile.h / (th * tileScale);
-
-        const cx0 = Math.max(x, sx + ov) * tileScale;
-        const cy0 = Math.max(y, sy + ov) * tileScale;
-        const cx1 = Math.min(ex, x + this.tile - ov) * tileScale;
-        const cy1 = Math.min(ey, y + this.tile - ov) * tileScale;
 
         const tileRgba = this.chwToRgba(outTile.data, outTile.w, outTile.h);
-        blitScaled(
+        blitBlend(
           tileRgba,
           outTile.w,
           outTile.h,
-          finalRgba,
+          sum,
+          wsum,
           targetW,
-          (cx0 - sx * tileScale) * fx,
-          (cy0 - sy * tileScale) * fy,
-          (cx1 - cx0) * fx,
-          (cy1 - cy0) * fy,
-          cx0,
-          cy0,
+          0,
+          0,
+          outTile.w,
+          outTile.h,
+          sx * tileScale,
+          sy * tileScale,
+          sx * tileScale,
+          (sx + tw) * tileScale,
+          sy * tileScale,
+          (sy + th) * tileScale,
+          ov * tileScale,
         );
       }
     }
     const outCanvas = new OffscreenCanvas(targetW, targetH);
+    const finalRgba = new Uint8ClampedArray(targetW * targetH * 4);
+    for (let i = 0; i < targetW * targetH; i++) {
+      const w = wsum[i];
+      finalRgba[i * 4] = w > 0 ? sum[i * 3] / w : 0;
+      finalRgba[i * 4 + 1] = w > 0 ? sum[i * 3 + 1] / w : 0;
+      finalRgba[i * 4 + 2] = w > 0 ? sum[i * 3 + 2] / w : 0;
+      finalRgba[i * 4 + 3] = 255;
+    }
+    if (import.meta.env.DEV) {
+      let zeros = 0;
+      let firstZero: number[] | null = null;
+      for (let yy = 0; yy < targetH; yy += 3) {
+        for (let xx = 0; xx < targetW; xx += 7) {
+          if (wsum[yy * targetW + xx] === 0) {
+            zeros++;
+            if (!firstZero) firstZero = [xx, yy];
+          }
+        }
+      }
+      if (zeros > 0) console.log('[dbg] wsum==0 count:', zeros, 'first:', firstZero, 'target:', targetW, targetH);
+    }
     outCanvas.getContext('2d')!.putImageData(new ImageData(finalRgba, targetW, targetH), 0, 0);
     return outCanvas;
   }
@@ -288,11 +317,12 @@ function toByte(v: number, range: number): number {
   return (v / range) * 255;
 }
 
-function blitScaled(
+function blitBlend(
   src: Uint8ClampedArray,
   sw: number,
   sh: number,
-  dst: Uint8ClampedArray,
+  sum: Float32Array,
+  wsum: Float32Array,
   dW: number,
   rx: number,
   ry: number,
@@ -300,10 +330,17 @@ function blitScaled(
   rh: number,
   dx: number,
   dy: number,
+  tileL: number,
+  tileR: number,
+  tileT: number,
+  tileB: number,
+  feather: number,
 ): void {
   const xRatio = sw / rw;
   const yRatio = sh / rh;
+  const effF = feather > 0 ? feather : 1;
   for (let y = 0; y < rh; y++) {
+    const py = dy + y;
     const fy = ry + (y + 0.5) * yRatio - 0.5;
     let y0 = Math.floor(fy);
     const wy = fy - y0;
@@ -313,8 +350,18 @@ function blitScaled(
     if (y1 >= sh) y1 = sh - 1;
     const rowA = y0 * sw;
     const rowB = y1 * sw;
-    let di = ((dy + y) * dW + dx) * 4;
+
+    let wyEdge = 1;
+    if (feather > 0) {
+      const dTop = py - tileT;
+      const dB = tileB - py;
+      wyEdge = Math.max(0, Math.min(1, Math.min(dTop, dB) / effF));
+      if (tileT <= 0 && dTop <= effF) wyEdge = 1;
+      if (dB <= effF) wyEdge = 1;
+    }
+
     for (let x = 0; x < rw; x++) {
+      const px = dx + x;
       const fx = rx + (x + 0.5) * xRatio - 0.5;
       let x0 = Math.floor(fx);
       const wx = fx - x0;
@@ -322,6 +369,17 @@ function blitScaled(
       if (x0 >= sw) x0 = sw - 1;
       let x1 = x0 + 1;
       if (x1 >= sw) x1 = sw - 1;
+
+      let w = wyEdge;
+      if (feather > 0) {
+        const dL = px - tileL;
+        const dR = tileR - px;
+        let wxEdge = Math.max(0, Math.min(1, Math.min(dL, dR) / effF));
+        if (tileL <= 0 && dL <= effF) wxEdge = 1;
+        if (dR <= effF) wxEdge = 1;
+        w = wxEdge * wyEdge;
+      }
+
       const i00 = (rowA + x0) * 4;
       const i10 = (rowA + x1) * 4;
       const i01 = (rowB + x0) * 4;
@@ -330,14 +388,17 @@ function blitScaled(
       const w10 = wx * (1 - wy);
       const w01 = (1 - wx) * wy;
       const w11 = wx * wy;
-      dst[di] = src[i00] * w00 + src[i10] * w10 + src[i01] * w01 + src[i11] * w11;
-      dst[di + 1] = src[i00 + 1] * w00 + src[i10 + 1] * w10 + src[i01 + 1] * w01 + src[i11 + 1] * w11;
-      dst[di + 2] = src[i00 + 2] * w00 + src[i10 + 2] * w10 + src[i01 + 2] * w01 + src[i11 + 2] * w11;
-      dst[di + 3] = 255;
-      di += 4;
+
+      const di = (py * dW + px) * 3;
+      const acc = w;
+      sum[di] += (src[i00] * w00 + src[i10] * w10 + src[i01] * w01 + src[i11] * w11) * acc;
+      sum[di + 1] += (src[i00 + 1] * w00 + src[i10 + 1] * w10 + src[i01 + 1] * w01 + src[i11 + 1] * w11) * acc;
+      sum[di + 2] += (src[i00 + 2] * w00 + src[i10 + 2] * w10 + src[i01 + 2] * w01 + src[i11 + 2] * w11) * acc;
+      wsum[py * dW + px] += acc;
     }
   }
 }
+
 
 export async function listCachedModels(): Promise<Record<string, boolean>> {
   try {
