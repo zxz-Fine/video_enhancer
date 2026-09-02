@@ -298,7 +298,15 @@ const asciiResult = await page.evaluate(
         scale: 1,
         sharpness: 0,
         mode: 'ascii',
-        ascii: { columns: 80, charsetId: 'classic', color: false, invert: false },
+        ascii: {
+          columns: 80,
+          charsetId: 'classic',
+          color: false,
+          invert: false,
+          threshold: 0,
+          bgColor: '#000000',
+          fgColor: '#ffffff',
+        },
       },
       () => {},
       () => false,
@@ -429,6 +437,28 @@ await page.setInputFiles('#file-input', {
   mimeType: 'video/mp4',
   buffer: Buffer.from(videoB64, 'base64'),
 });
+await page.waitForTimeout(800);
+
+// ASCII 预览：切换类别后预览画布应渲染出非全黑字符画
+await page.click('#category-group label:nth-child(2)');
+await page.waitForTimeout(1500);
+const previewCheck = await page.evaluate(() => {
+  const c = document.querySelector('#ascii-preview-canvas');
+  if (!c || !c.width) return { fail: 'canvas 未渲染' };
+  const ctx = c.getContext('2d');
+  const d = ctx.getImageData(0, 0, c.width, c.height).data;
+  let bright = 0;
+  for (let i = 0; i < d.length; i += 4 * 23) if (d[i] + d[i + 1] + d[i + 2] > 150) bright++;
+  return { w: c.width, h: c.height, bright };
+});
+console.log('ASCII preview:', previewCheck);
+if (previewCheck.fail || previewCheck.bright < 5) {
+  console.log('ASCII PREVIEW FAIL');
+  process.exitCode = 1;
+}
+// 换回画质增强类别，保证后续 UI 流程走默认路径
+await page.click('#category-group label:nth-child(1)');
+await page.waitForTimeout(300);
 await page.click('#start-btn');
 await page.waitForSelector('#result-section', { state: 'visible', timeout: 120000 });
 await page.screenshot({ path: '/tmp/opencode/ui-result.png' });

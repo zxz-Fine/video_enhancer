@@ -1,5 +1,6 @@
 import { enhanceVideo, probeVideo, type EnhanceResult, type ScaleFactor } from './enhance';
 import { onLog, getLogs, type LogEntry } from './logger';
+import { asciiConvert, getAsciiCharset, type AsciiJobOptions, type AsciiOptions } from './ascii';
 
 const $ = <T extends HTMLElement>(sel: string): T => {
   const el = document.querySelector(sel);
@@ -41,6 +42,15 @@ const asciiCols = $('#ascii-cols') as HTMLInputElement;
 const asciiColsValue = $('#ascii-cols-value');
 const asciiColorEl = $('#ascii-color') as HTMLInputElement;
 const asciiInvertEl = $('#ascii-invert') as HTMLInputElement;
+const asciiThreshold = $('#ascii-threshold') as HTMLInputElement;
+const asciiThresholdValue = $('#ascii-threshold-value');
+const asciiBgColor = $('#ascii-bg-color') as HTMLInputElement;
+const asciiFgColor = $('#ascii-fg-color') as HTMLInputElement;
+const asciiPreviewCanvas = $('#ascii-preview-canvas') as HTMLCanvasElement;
+const asciiPreviewVideo = $('#ascii-preview-video') as HTMLVideoElement;
+const asciiPreviewSeek = $('#ascii-preview-seek') as HTMLInputElement;
+const asciiPreviewPlayBtn = $('#ascii-preview-play') as HTMLButtonElement;
+const asciiPreviewTime = $('#ascii-preview-time');
 
 function badge(cls: string, text: string, el: HTMLElement): void {
   el.className = `badge ${cls}`;
@@ -84,7 +94,16 @@ function setFile(file: File | null): void {
   selectedFile = file;
   setError(null);
   resultSection.style.display = 'none';
+  if (asciiPreviewUrl) {
+    URL.revokeObjectURL(asciiPreviewUrl);
+    asciiPreviewUrl = null;
+  }
+  stopAsciiPreviewPlayback();
   if (file) {
+    asciiPreviewUrl = URL.createObjectURL(file);
+    asciiPreviewVideo.src = asciiPreviewUrl;
+    asciiPreviewSeek.value = '0';
+    asciiPreviewTime.textContent = '0.0s';
     const v = document.createElement('video');
     v.preload = 'metadata';
     v.src = URL.createObjectURL(file);
@@ -157,7 +176,31 @@ halfInputEl.addEventListener('change', () => {
 // 功能类别：画质增强 / 视频转 ASCII
 asciiCols.addEventListener('input', () => {
   asciiColsValue.textContent = asciiCols.value;
+  renderAsciiPreview();
 });
+asciiThreshold.addEventListener('input', () => {
+  asciiThresholdValue.textContent = `${asciiThreshold.value}%`;
+  renderAsciiPreview();
+});
+for (const el of [asciiColorEl, asciiInvertEl, asciiBgColor, asciiFgColor]) {
+  el.addEventListener('change', () => renderAsciiPreview());
+}
+// 反转梯度时自动交换底/字色，保持"黑底白字↔白底黑字"的直觉
+asciiInvertEl.addEventListener('change', () => {
+  const bg = asciiBgColor.value;
+  asciiBgColor.value = asciiFgColor.value;
+  asciiFgColor.value = bg;
+});
+for (const r of document.querySelectorAll<HTMLInputElement>('input[name="ascii-charset"]')) {
+  r.addEventListener('change', () => renderAsciiPreview());
+}
+for (const btn of document.querySelectorAll<HTMLButtonElement>('.ascii-preset')) {
+  btn.addEventListener('click', () => {
+    asciiCols.value = btn.dataset.cols ?? '120';
+    asciiColsValue.textContent = asciiCols.value;
+    renderAsciiPreview();
+  });
+}
 
 function currentMode(): 'enhance' | 'ascii' {
   for (const r of document.querySelectorAll<HTMLInputElement>('input[name="category"]')) {
@@ -171,8 +214,95 @@ for (const r of document.querySelectorAll<HTMLInputElement>('input[name="categor
     const ascii = currentMode() === 'ascii';
     enhanceOptions.style.display = ascii ? 'none' : 'block';
     asciiOptions.style.display = ascii ? 'block' : 'none';
+    if (ascii) renderAsciiPreview();
+    else stopAsciiPreviewPlayback();
   });
 }
+
+// ===== ASCII 实时预览：隐藏 video 逐帧解码 → asciiConvert → 预览画布 =====
+let asciiPreviewUrl: string | null = null;
+let asciiPlaying = false;
+let asciiRaf = 0;
+
+function asciiJobOptsFromUi(): AsciiJobOptions {
+  return {
+    columns: Number(asciiCols.value),
+    charsetId:
+      document.querySelector<HTMLInputElement>('input[name="ascii-charset"]:checked')?.value ?? 'classic',
+    color: asciiColorEl.checked,
+    invert: asciiInvertEl.checked,
+    threshold: Number(asciiThreshold.value),
+    bgColor: asciiBgColor.value,
+    fgColor: asciiFgColor.value,
+  };
+}
+
+function renderAsciiPreview(): void {
+  if (currentMode() !== 'ascii' || !selectedFile) return;
+  const v = asciiPreviewVideo;
+  if (v.readyState < 2 || !v.videoWidth) return;
+  const off = new OffscreenCanvas(v.videoWidth, v.videoHeight);
+  off.getContext('2d')!.drawImage(v, 0, 0);
+  const job = asciiJobOptsFromUi();
+  const opts: AsciiOptions = {
+    columns: job.columns,
+    charset: getAsciiCharset(job.charsetId),
+    color: job.color,
+    invert: job.invert,
+    threshold: job.threshold,
+    bgColor: job.bgColor,
+    fgColor: job.fgColor,
+  };
+  const result = asciiConvert(off, opts);
+  if (asciiPreviewCanvas.width !== result.width || asciiPreviewCanvas.height !== result.height) {
+    asciiPreviewCanvas.width = result.width;
+    asciiPreviewCanvas.height = result.height;
+  }
+  asciiPreviewCanvas.getContext('2d')!.drawImage(result, 0, 0);
+}
+
+function stopAsciiPreviewPlayback(): void {
+  asciiPlaying = false;
+  cancelAnimationFrame(asciiRaf);
+  asciiPreviewVideo.pause();
+  asciiPreviewPlayBtn.textContent = '▶ 预览播放';
+}
+
+function asciiPreviewLoop(): void {
+  if (!asciiPlaying) return;
+  renderAsciiPreview();
+  const dur = asciiPreviewVideo.duration || 1;
+  asciiPreviewSeek.value = String(Math.round((asciiPreviewVideo.currentTime / dur) * 1000));
+  asciiPreviewTime.textContent = `${asciiPreviewVideo.currentTime.toFixed(1)}s / ${dur.toFixed(1)}s`;
+  asciiRaf = requestAnimationFrame(asciiPreviewLoop);
+}
+
+asciiPreviewPlayBtn.addEventListener('click', () => {
+  if (asciiPlaying) {
+    stopAsciiPreviewPlayback();
+    return;
+  }
+  asciiPlaying = true;
+  asciiPreviewPlayBtn.textContent = '⏸ 暂停预览';
+  asciiPreviewVideo.play().catch(() => stopAsciiPreviewPlayback());
+  asciiRaf = requestAnimationFrame(asciiPreviewLoop);
+});
+
+asciiPreviewVideo.addEventListener('ended', () => stopAsciiPreviewPlayback());
+asciiPreviewVideo.addEventListener('seeked', () => renderAsciiPreview());
+asciiPreviewVideo.addEventListener('loadeddata', () => {
+  // 某些环境（headless/部分合成器）未 seek 过的视频 drawImage 出黑帧，先跳到 1/3 处触发帧解码
+  if (asciiPreviewVideo.duration > 0.1) {
+    asciiPreviewVideo.currentTime = asciiPreviewVideo.duration / 3;
+  }
+  renderAsciiPreview();
+});
+asciiPreviewSeek.addEventListener('input', () => {
+  stopAsciiPreviewPlayback();
+  const dur = asciiPreviewVideo.duration || 0;
+  asciiPreviewVideo.currentTime = (Number(asciiPreviewSeek.value) / 1000) * dur;
+  asciiPreviewTime.textContent = `${asciiPreviewVideo.currentTime.toFixed(1)}s / ${dur.toFixed(1)}s`;
+});
 
 cancelBtn.addEventListener('click', () => {
   cancelFlag = true;
@@ -197,13 +327,17 @@ startBtn.addEventListener('click', async () => {
   const aiHalfInput = engine !== 'fsr' ? halfInputEl.checked : false;
   const hwEncode = ($('#hw-encode') as HTMLInputElement).checked;
   const mode = currentMode();
-  const ascii =
+  const ascii: AsciiJobOptions | undefined =
     mode === 'ascii'
       ? {
           columns: Number(asciiCols.value),
-          charsetId: (document.querySelector<HTMLInputElement>('input[name="ascii-charset"]:checked')?.value) ?? 'classic',
+          charsetId:
+            document.querySelector<HTMLInputElement>('input[name="ascii-charset"]:checked')?.value ?? 'classic',
           color: asciiColorEl.checked,
           invert: asciiInvertEl.checked,
+          threshold: Number(asciiThreshold.value),
+          bgColor: asciiBgColor.value,
+          fgColor: asciiFgColor.value,
         }
       : undefined;
 

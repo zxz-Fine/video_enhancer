@@ -125,6 +125,9 @@ export async function enhanceVideo(
         charset: getAsciiCharset(options.ascii!.charsetId),
         color: options.ascii!.color,
         invert: options.ascii!.invert,
+        threshold: options.ascii!.threshold,
+        bgColor: options.ascii!.bgColor,
+        fgColor: options.ascii!.fgColor,
       }
     : null;
   const engine = !asciiOn && options.engine && options.engine !== 'fsr' ? options.engine : null;
@@ -137,7 +140,9 @@ export async function enhanceVideo(
     log(
       'info',
       `ASCII 参数: ${options.ascii.columns} 列, 字符集 ${options.ascii.charsetId}` +
-        `, ${options.ascii.color ? '彩色' : '单色'}${options.ascii.invert ? ', 反相(白底黑字)' : ''}`,
+        `, ${options.ascii.color ? '彩色' : '单色'}` +
+        `${options.ascii.invert ? ', 梯度反转' : ''}` +
+        `${options.ascii.threshold > 0 ? `, 亮度阈值 ${options.ascii.threshold}%` : ''}`,
     );
   }
   const aiScale = engine ? getModel(engine).scale : null;

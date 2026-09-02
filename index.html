@@ -121,6 +121,24 @@
         background: transparent; color: var(--text);
         border: 1px solid var(--border); border-radius: 6px;
       }
+      .ascii-preset {
+        padding: 4px 10px; font-size: 0.78rem;
+        background: transparent; color: var(--text);
+        border: 1px solid var(--border); border-radius: 6px;
+      }
+      .ascii-preset:hover { border-color: var(--accent); color: var(--accent); }
+      #ascii-preview-canvas {
+        width: 100%; display: block; background: #000;
+        border: 1px solid var(--border); border-radius: 8px;
+        max-height: 420px; object-fit: contain;
+      }
+      #ascii-preview-video { display: none; }
+      #ascii-preview-seek { flex: 1; accent-color: var(--accent); }
+      #ascii-preview-play {
+        padding: 6px 14px; font-size: 0.85rem;
+        background: transparent; color: var(--text);
+        border: 1px solid var(--border); border-radius: 6px;
+      }
       #download-link {
         display: inline-block; margin-top: 18px; padding: 11px 26px;
         background: var(--accent); color: #fff; text-decoration: none;
@@ -251,14 +269,27 @@
             <div class="control-group">
               <label class="group-label">字符列数：<span id="ascii-cols-value" style="color: var(--accent)">120</span></label>
               <input id="ascii-cols" type="range" min="40" max="240" value="120" />
-              <small style="display: block; color: var(--muted)">越大细节越多、字符越小</small>
+              <div style="margin-top: 6px; display: flex; gap: 6px">
+                <button type="button" class="ascii-preset" data-cols="60">低 60</button>
+                <button type="button" class="ascii-preset" data-cols="130">中 130</button>
+                <button type="button" class="ascii-preset" data-cols="220">高 220</button>
+              </div>
             </div>
             <div class="control-group">
               <label class="group-label">字符集</label>
               <div class="radio-group" id="ascii-charset-group">
-                <label><input type="radio" name="ascii-charset" value="classic" checked /><span>经典<small>10 级</small></span></label>
-                <label><input type="radio" name="ascii-charset" value="detailed" /><span>细致<small>67 级</small></span></label>
-                <label><input type="radio" name="ascii-charset" value="blocks" /><span>块状<small>5 级</small></span></label>
+                <label><input type="radio" name="ascii-charset" value="classic" checked /><span>经典</span></label>
+                <label><input type="radio" name="ascii-charset" value="standard" /><span>细腻<small>70 级</small></span></label>
+                <label><input type="radio" name="ascii-charset" value="matrix" /><span>矩阵</span></label>
+                <label><input type="radio" name="ascii-charset" value="pixel" /><span>像素块</span></label>
+                <label><input type="radio" name="ascii-charset" value="circles" /><span>圆点</span></label>
+                <label><input type="radio" name="ascii-charset" value="braille" /><span>盲文点</span></label>
+                <label><input type="radio" name="ascii-charset" value="scanlines" /><span>扫描线</span></label>
+              </div>
+              <div style="margin-top: 8px">
+                <label class="group-label">暗部阈值：<span id="ascii-threshold-value" style="color: var(--accent)">0%</span></label>
+                <input id="ascii-threshold" type="range" min="0" max="60" value="0" />
+                <small style="display: block; color: var(--muted)">低于该亮度的格子留空，去除暗部噪点</small>
               </div>
             </div>
             <div class="control-group">
@@ -267,11 +298,25 @@
                 <input id="ascii-color" type="checkbox" /> 彩色（保留原像素颜色）
               </label>
               <label style="display: block; font-size: 0.85rem; cursor: pointer; user-select: none">
-                <input id="ascii-invert" type="checkbox" /> 反相（白底黑字）
+                <input id="ascii-invert" type="checkbox" /> 反转梯度（勾选时自动交换底/字色）
               </label>
+              <div style="margin-top: 6px; display: flex; gap: 12px; align-items: center; font-size: 0.85rem">
+                <label>底色 <input id="ascii-bg-color" type="color" value="#000000" /></label>
+                <label>字色 <input id="ascii-fg-color" type="color" value="#ffffff" /></label>
+              </div>
             </div>
           </div>
-          <small style="color: var(--muted)">按源分辨率逐帧重绘字符；锐度、超分、AI、插帧等画质选项在此模式不适用</small>
+          <div id="ascii-preview-wrap" style="margin-top: 14px">
+            <label class="group-label">实时预览（转换前先看效果，拖动进度条选观察点）</label>
+            <canvas id="ascii-preview-canvas"></canvas>
+            <div class="loupe-head" style="margin-top: 8px">
+              <button id="ascii-preview-play" type="button">▶ 预览播放</button>
+              <input id="ascii-preview-seek" type="range" min="0" max="1000" value="0" style="flex: 1" />
+              <span id="ascii-preview-time" style="font-variant-numeric: tabular-nums; color: var(--muted); font-size: 0.85rem">0.0s</span>
+            </div>
+            <video id="ascii-preview-video" muted playsinline></video>
+            <small style="color: var(--muted)">预览即最终效果；正式转换按同样参数处理全片并编码</small>
+          </div>
         </div>
         <div class="btn-row">
           <button id="start-btn">开始处理</button>
