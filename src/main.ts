@@ -163,9 +163,9 @@ startBtn.addEventListener('click', async () => {
   }
   const sharpness = Number(sharpSlider.value) / 100;
   const engine = currentEngine();
-  let interpolation: 'none' | 'x2' = 'none';
+  let interpolation: 'none' | 'x2' | 'x4' = 'none';
   for (const r of document.querySelectorAll<HTMLInputElement>('input[name="interp"]')) {
-    if (r.checked) interpolation = r.value as 'none' | 'x2';
+    if (r.checked) interpolation = r.value as 'none' | 'x2' | 'x4';
   }
   const aiKeepResolution = engine !== 'fsr' ? aiKeepRes.checked : false;
   const aiHalfInput = engine !== 'fsr' ? halfInputEl.checked : false;

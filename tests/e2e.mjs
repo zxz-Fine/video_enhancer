@@ -344,6 +344,34 @@ if (interpResult.packets < 7 || interpResult.packets > 10) {
   process.exitCode = 1;
 }
 
+// Interpolation x4：4 源帧 → 1 + 4*3 + 1 = 14 输出包
+const interp4Result = await page.evaluate(
+  async ({ b64 }) => {
+    const { enhanceVideo } = await import('/src/enhance.ts');
+    const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+    const file = new File([bytes], 'interp4.mp4', { type: 'video/mp4' });
+    const mb = await import('/node_modules/mediabunny/dist/modules/src/index.js');
+    const res = await enhanceVideo(
+      { file, scale: 1, sharpness: 0.3, engine: 'fsr', interpolation: 'x4', allowBlackFrames: true },
+      () => {},
+      () => false,
+    );
+    const input = new mb.Input({
+      formats: mb.ALL_FORMATS,
+      source: new mb.BlobSource(new Blob([new Uint8Array(await res.blob.arrayBuffer())])),
+    });
+    const vt = await input.getPrimaryVideoTrack();
+    const stats = await vt.computePacketStats(500);
+    return { packets: stats.packetCount, fpsOut: stats.averagePacketRate.toFixed(1) };
+  },
+  { b64: interpB64 },
+);
+console.log('interp x4:', interp4Result);
+if (interp4Result.packets < 13 || interp4Result.packets > 15) {
+  console.log('INTERP X4 TEST FAIL (expected ~14 packets)');
+  process.exitCode = 1;
+}
+
 // UI flow
 await page.setInputFiles('#file-input', {
   name: 'ui-test.mp4',

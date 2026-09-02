@@ -243,14 +243,18 @@ export class FrameEnhancer {
       this.device.queue.submit([enc.finish()]);
       await readBuf.mapAsync(GPUMapMode.READ);
       const px = new Uint8Array(readBuf.getMappedRange());
-      const sum = px[0] + px[1] + px[2];
+      // unmap 后映射分离，值必须在 unmap 前取出
+      const p0 = px[0];
+      const p1 = px[1];
+      const p2 = px[2];
+      const sum = p0 + p1 + p2;
       readBuf.unmap();
       readBuf.destroy();
       if (sum === 0) {
         this.uploadMode = 'writeTexture';
         log('warn', 'copyExternalImageToTexture 上传为黑帧 → 切换 CPU 直写纹理通道');
       } else {
-        log('gpu', `纹理上传通路正常 (探针 ${px[0]},${px[1]},${px[2]})`);
+        log('gpu', `纹理上传通路正常 (探针 ${p0},${p1},${p2})`);
       }
     }
   }

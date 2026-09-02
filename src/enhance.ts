@@ -33,8 +33,8 @@ export interface EnhanceOptions {
   aiKeepResolution?: boolean;
   /** AI 引擎时：半分辨率推理（计算量降 4 倍，画质略降） */
   aiHalfInput?: boolean;
-  /** 插帧：'none' 或 'x2'（RIFE 运动插帧） */
-  interpolation?: 'none' | 'x2';
+  /** 插帧：'none' / 'x2' / 'x4'（RIFE 运动插帧） */
+  interpolation?: 'none' | 'x2' | 'x4';
   /** 测试专用：允许全黑输出（headless 软渲染） */
   allowBlackFrames?: boolean;
 }
@@ -142,8 +142,9 @@ export async function enhanceVideo(
     target: new BufferTarget(),
   });
 
-  const interpOn = options.interpolation === 'x2';
-  const outFps = interpOn ? fps * 2 : fps;
+  const interpFactor = options.interpolation === 'x4' ? 4 : options.interpolation === 'x2' ? 2 : 0;
+  const interpOn = interpFactor > 0;
+  const outFps = interpOn ? fps * interpFactor : fps;
   const bitrate = Math.min(100e6, Math.max(2e6, Math.round(outW * outH * outFps * 0.12)));
   log('info', `输出: ${outW}x${outH} @ ${outFps.toFixed(1)}fps, 编码 ${codec}, 码率 ${(bitrate / 1e6).toFixed(1)}Mbps`);
   const videoSource = new VideoSampleSource({
@@ -264,21 +265,24 @@ export async function enhanceVideo(
       if (inter) {
         const curRgba = canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height).data;
         if (prevCanvas && prevRgba) {
-          const mid = await inter.interpolate(prevRgba, curRgba, canvas.width, canvas.height, 0.5);
-          const midCanvas = new OffscreenCanvas(canvas.width, canvas.height);
-          midCanvas.getContext('2d')!.putImageData(new ImageData(mid, canvas.width, canvas.height), 0, 0);
           stage = 'video-encode';
           try {
             const o1 = new VideoSample(prevCanvas, { timestamp: emitted * frameDur, duration: frameDur });
             await videoSource.add(o1);
             o1.close();
-            const o2 = new VideoSample(midCanvas, { timestamp: (emitted + 1) * frameDur, duration: frameDur });
-            await videoSource.add(o2);
-            o2.close();
+            // 相邻两帧之间均匀补 interpFactor-1 个中间帧（t = k/N）
+            for (let k = 1; k < interpFactor; k++) {
+              const mid = await inter.interpolate(prevRgba, curRgba, canvas.width, canvas.height, k / interpFactor);
+              const midCanvas = new OffscreenCanvas(canvas.width, canvas.height);
+              midCanvas.getContext('2d')!.putImageData(new ImageData(mid, canvas.width, canvas.height), 0, 0);
+              const om = new VideoSample(midCanvas, { timestamp: (emitted + k) * frameDur, duration: frameDur });
+              await videoSource.add(om);
+              om.close();
+            }
           } finally {
             stage = 'video-decode';
           }
-          emitted += 2;
+          emitted += interpFactor;
         } else {
           stage = 'video-encode';
           try {
