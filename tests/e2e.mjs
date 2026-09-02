@@ -77,6 +77,38 @@ const videoB64 = await page.evaluate(async () => {
 });
 console.log('test video bytes:', Buffer.from(videoB64, 'base64').length);
 
+// 短视频（8 帧）：AI / 插帧用例用，headless CPU 推理是 e2e 耗时大头
+const shortB64 = await page.evaluate(async () => {
+  const mb = await import('/node_modules/mediabunny/dist/modules/src/index.js');
+  const canvas = document.createElement('canvas');
+  canvas.width = 320;
+  canvas.height = 240;
+  const ctx = canvas.getContext('2d');
+  const output = new mb.Output({ format: new mb.Mp4OutputFormat(), target: new mb.BufferTarget() });
+  const source = new mb.CanvasSource(canvas, { codec: 'avc', quality: new mb.Quality({ bitrate: 2e6 }) });
+  output.addVideoTrack(source, { frameRate: 30 });
+  await output.start();
+  for (let i = 0; i < 8; i++) {
+    const g = ctx.createLinearGradient(0, 0, 320, 240);
+    g.addColorStop(0, `hsl(${i * 15}, 80%, 60%)`);
+    g.addColorStop(1, `hsl(${i * 15 + 90}, 90%, 35%)`);
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, 320, 240);
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(20 + i * 8, 100, 40, 40);
+    ctx.fillStyle = '#000';
+    ctx.font = '20px monospace';
+    ctx.fillText(`F${i}`, 250, 220);
+    await source.add(i / 30, 1 / 30);
+  }
+  source.close();
+  await output.finalize();
+  const buf = new Uint8Array(output.target.buffer);
+  let bin = '';
+  for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
+  return btoa(bin);
+});
+
 for (const scale of [1, 2, 4]) {
   const result = await page.evaluate(
     async ({ b64, scale }) => {
@@ -160,7 +192,7 @@ if (negResult.firstTs > 0.01 || negResult.frames !== 8) {
   process.exitCode = 1;
 }
 
-// AI engine path (IMDN x2)
+// AI engine path (IMDN x2, short video)
 const aiResult = await page.evaluate(
   async ({ b64 }) => {
     const { enhanceVideo } = await import('/src/enhance.ts');
@@ -180,10 +212,10 @@ const aiResult = await page.evaluate(
     const vt = await input.getPrimaryVideoTrack();
     return { w: res.width, h: res.height, frames: res.processedFrames, size: buf.length, tw: vt.codedWidth, th: vt.codedHeight };
   },
-  { b64: videoB64 },
+  { b64: shortB64 },
 );
 console.log('AI IMDN x2:', aiResult);
-if (aiResult.w !== 640 || aiResult.frames !== 24 || aiResult.size < 30000) {
+if (aiResult.w !== 640 || aiResult.frames !== 8 || aiResult.size < 10000) {
   console.log('AI TEST FAIL');
   process.exitCode = 1;
 }
@@ -254,14 +286,42 @@ if (keepResResult.fail || keepResResult.mad > 8) {
   process.exitCode = 1;
 }
 
-// Interpolation x2 (RIFE)
+// Interpolation x2 (RIFE) — 160x120、4 帧：RIFE CPU 推理是 e2e 最大耗时项，
+// 120 非 32 倍数可顺带覆盖 padding 修复路径
+const interpB64 = await page.evaluate(async () => {
+  const mb = await import('/node_modules/mediabunny/dist/modules/src/index.js');
+  const canvas = document.createElement('canvas');
+  canvas.width = 160;
+  canvas.height = 120;
+  const ctx = canvas.getContext('2d');
+  const output = new mb.Output({ format: new mb.Mp4OutputFormat(), target: new mb.BufferTarget() });
+  const source = new mb.CanvasSource(canvas, { codec: 'avc', quality: new mb.Quality({ bitrate: 1e6 }) });
+  output.addVideoTrack(source, { frameRate: 30 });
+  await output.start();
+  for (let i = 0; i < 4; i++) {
+    const g = ctx.createLinearGradient(0, 0, 160, 120);
+    g.addColorStop(0, `hsl(${i * 40}, 80%, 60%)`);
+    g.addColorStop(1, `hsl(${i * 40 + 120}, 90%, 35%)`);
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, 160, 120);
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(20 + i * 20, 40, 30, 30);
+    await source.add(i / 30, 1 / 30);
+  }
+  source.close();
+  await output.finalize();
+  const buf = new Uint8Array(output.target.buffer);
+  let bin = '';
+  for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
+  return btoa(bin);
+});
+
 const interpResult = await page.evaluate(
   async ({ b64 }) => {
     const { enhanceVideo } = await import('/src/enhance.ts');
     const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
     const file = new File([bytes], 'interp.mp4', { type: 'video/mp4' });
     const mb = await import('/node_modules/mediabunny/dist/modules/src/index.js');
-    let mid = 0;
     const res = await enhanceVideo(
       { file, scale: 1, sharpness: 0.3, engine: 'fsr', interpolation: 'x2', allowBlackFrames: true },
       () => {},
@@ -276,11 +336,11 @@ const interpResult = await page.evaluate(
     const fpsOut = stats.averagePacketRate;
     return { packets: stats.packetCount, fpsOut: fpsOut.toFixed(1), duration: (await input.computeDuration()).toFixed(2) };
   },
-  { b64: videoB64 },
+  { b64: interpB64 },
 );
 console.log('interp x2:', interpResult);
-if (interpResult.packets < 45 || interpResult.packets > 49) {
-  console.log('INTERP TEST FAIL (expected ~47-48 packets)');
+if (interpResult.packets < 7 || interpResult.packets > 10) {
+  console.log('INTERP TEST FAIL (expected ~8 packets)');
   process.exitCode = 1;
 }
 
