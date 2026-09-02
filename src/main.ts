@@ -35,6 +35,12 @@ const logToggle = $('#log-toggle') as HTMLButtonElement;
 const loupeCanvas = $('#loupe-canvas') as HTMLCanvasElement;
 const loupePlayBtn = $('#loupe-play') as HTMLButtonElement;
 const halfInputEl = $('#ai-half-input') as HTMLInputElement;
+const enhanceOptions = $('#enhance-options');
+const asciiOptions = $('#ascii-options');
+const asciiCols = $('#ascii-cols') as HTMLInputElement;
+const asciiColsValue = $('#ascii-cols-value');
+const asciiColorEl = $('#ascii-color') as HTMLInputElement;
+const asciiInvertEl = $('#ascii-invert') as HTMLInputElement;
 
 function badge(cls: string, text: string, el: HTMLElement): void {
   el.className = `badge ${cls}`;
@@ -148,6 +154,26 @@ halfInputEl.addEventListener('change', () => {
   if (halfInputEl.checked) aiKeepRes.checked = false;
 });
 
+// 功能类别：画质增强 / 视频转 ASCII
+asciiCols.addEventListener('input', () => {
+  asciiColsValue.textContent = asciiCols.value;
+});
+
+function currentMode(): 'enhance' | 'ascii' {
+  for (const r of document.querySelectorAll<HTMLInputElement>('input[name="category"]')) {
+    if (r.checked) return r.value as 'enhance' | 'ascii';
+  }
+  return 'enhance';
+}
+
+for (const r of document.querySelectorAll<HTMLInputElement>('input[name="category"]')) {
+  r.addEventListener('change', () => {
+    const ascii = currentMode() === 'ascii';
+    enhanceOptions.style.display = ascii ? 'none' : 'block';
+    asciiOptions.style.display = ascii ? 'block' : 'none';
+  });
+}
+
 cancelBtn.addEventListener('click', () => {
   cancelFlag = true;
   cancelBtn.disabled = true;
@@ -170,6 +196,16 @@ startBtn.addEventListener('click', async () => {
   const aiKeepResolution = engine !== 'fsr' ? aiKeepRes.checked : false;
   const aiHalfInput = engine !== 'fsr' ? halfInputEl.checked : false;
   const hwEncode = ($('#hw-encode') as HTMLInputElement).checked;
+  const mode = currentMode();
+  const ascii =
+    mode === 'ascii'
+      ? {
+          columns: Number(asciiCols.value),
+          charsetId: (document.querySelector<HTMLInputElement>('input[name="ascii-charset"]:checked')?.value) ?? 'classic',
+          color: asciiColorEl.checked,
+          invert: asciiInvertEl.checked,
+        }
+      : undefined;
 
   running = true;
   cancelFlag = false;
@@ -190,7 +226,7 @@ startBtn.addEventListener('click', async () => {
 
   try {
     const result: EnhanceResult = await enhanceVideo(
-      { file: selectedFile, scale, sharpness, engine, aiKeepResolution, aiHalfInput, interpolation, hwEncode },
+      { file: selectedFile, scale, sharpness, engine, aiKeepResolution, aiHalfInput, interpolation, hwEncode, mode, ascii },
       ({ phase, processed, total, modelStage, aiEp, frameMs, inferMs, interpMs, encodeMs }) => {
         if (phase === 'analyze') {
           statusText.textContent = '分析视频中…';
@@ -219,7 +255,7 @@ startBtn.addEventListener('click', async () => {
           } else {
             badge('gpu', '✓ GPU 加速中 (WebGPU)', computeBadge);
           }
-          badge('none', engine === 'fsr' ? '算法增强' : 'AI 引擎', engineBadge);
+          badge('none', mode === 'ascii' ? 'ASCII 转换' : engine === 'fsr' ? '算法增强' : 'AI 引擎', engineBadge);
           progressBar.style.width = `${pct}%`;
         }
       },
@@ -231,7 +267,8 @@ startBtn.addEventListener('click', async () => {
     enhancedVideo.src = resultUrl;
     downloadLink.href = resultUrl;
     const baseName = selectedFile.name.replace(/\.[^.]+$/, '');
-    downloadLink.download = `${baseName}-enhanced.mp4`;
+    downloadLink.download = `${baseName}-${mode === 'ascii' ? 'ascii' : 'enhanced'}.mp4`;
+    $('#enhanced-cap').textContent = mode === 'ascii' ? 'ASCII 转换后' : '增强后';
 
     const secs = (result.elapsedMs / 1000).toFixed(1);
     resultInfo.textContent =

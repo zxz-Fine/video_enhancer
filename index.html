@@ -132,7 +132,7 @@
   <body>
     <div class="container">
       <h1>本地视频画质增强器</h1>
-      <p class="subtitle">WebGPU 加速 · CAS 锐化（原分辨率）/ FSR 超分（2x/4x）· 全程本地处理，文件不上传</p>
+      <p class="subtitle">WebGPU 加速 · CAS 锐化 / FSR 超分 / AI 修复 · RIFE 插帧 · ASCII 字符画 · 全程本地处理，文件不上传</p>
 
       <div id="drop-zone">
         <span class="icon">🎬</span>
@@ -143,6 +143,24 @@
       <p id="file-meta"></p>
 
       <div id="controls">
+        <div class="control-row">
+          <div class="control-group">
+            <label class="group-label">功能类别</label>
+            <div class="radio-group" id="category-group">
+              <label>
+                <input type="radio" name="category" value="enhance" checked /><span
+                  >画质增强<small>锐化 · 超分 · AI 修复 · 插帧</small></span
+                >
+              </label>
+              <label>
+                <input type="radio" name="category" value="ascii" /><span
+                  >视频转 ASCII<small>字符画风格 · 纯算法 · 极快</small></span
+                >
+              </label>
+            </div>
+          </div>
+        </div>
+        <div id="enhance-options">
         <div class="control-row">
           <div class="control-group">
             <label class="group-label">处理引擎</label>
@@ -227,6 +245,34 @@
             </div>
           </div>
         </div>
+        </div>
+        <div id="ascii-options" style="display: none">
+          <div class="control-row">
+            <div class="control-group">
+              <label class="group-label">字符列数：<span id="ascii-cols-value" style="color: var(--accent)">120</span></label>
+              <input id="ascii-cols" type="range" min="40" max="240" value="120" />
+              <small style="display: block; color: var(--muted)">越大细节越多、字符越小</small>
+            </div>
+            <div class="control-group">
+              <label class="group-label">字符集</label>
+              <div class="radio-group" id="ascii-charset-group">
+                <label><input type="radio" name="ascii-charset" value="classic" checked /><span>经典<small>10 级</small></span></label>
+                <label><input type="radio" name="ascii-charset" value="detailed" /><span>细致<small>67 级</small></span></label>
+                <label><input type="radio" name="ascii-charset" value="blocks" /><span>块状<small>5 级</small></span></label>
+              </div>
+            </div>
+            <div class="control-group">
+              <label class="group-label">样式</label>
+              <label style="display: block; font-size: 0.85rem; cursor: pointer; user-select: none">
+                <input id="ascii-color" type="checkbox" /> 彩色（保留原像素颜色）
+              </label>
+              <label style="display: block; font-size: 0.85rem; cursor: pointer; user-select: none">
+                <input id="ascii-invert" type="checkbox" /> 反相（白底黑字）
+              </label>
+            </div>
+          </div>
+          <small style="color: var(--muted)">按源分辨率逐帧重绘字符；锐度、超分、AI、插帧等画质选项在此模式不适用</small>
+        </div>
         <div class="btn-row">
           <button id="start-btn">开始处理</button>
           <button id="cancel-btn" disabled>取消</button>
@@ -253,7 +299,7 @@
             <video id="original-video" controls muted></video>
           </div>
           <div class="cell">
-            <div class="cap">增强后</div>
+            <div class="cap" id="enhanced-cap">增强后</div>
             <video id="enhanced-video" controls muted></video>
           </div>
         </div>

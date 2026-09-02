@@ -20,6 +20,7 @@ import { FrameEnhancer, type ScaleFactor } from './gpu';
 import { AiEngine } from './ai';
 import { FrameInterpolator } from './interpolate';
 import { AI_MODELS, getModel } from './models';
+import { asciiConvert, getAsciiCharset, type AsciiJobOptions, type AsciiOptions } from './ascii';
 import { log } from './logger';
 
 export type { ScaleFactor };
@@ -41,6 +42,10 @@ export interface EnhanceOptions {
   allowBlackFrames?: boolean;
   /** 硬件编码加速：请求显卡固定功能编码器，浏览器/驱动不支持时自动回退软件 */
   hwEncode?: boolean;
+  /** 功能模式：画质增强（默认）或 ASCII 字符画转换 */
+  mode?: 'enhance' | 'ascii';
+  /** mode='ascii' 时的转换参数 */
+  ascii?: AsciiJobOptions;
 }
 
 export interface ProgressInfo {
@@ -113,11 +118,31 @@ export async function enhanceVideo(
   const totalFrames = Math.max(1, Math.round(duration * fps));
 
 
-  const engine = options.engine && options.engine !== 'fsr' ? options.engine : null;
-  log('info', `引擎: ${engine ?? '算法增强 (CAS/FSR)'}, 锐度 ${(options.sharpness * 100) | 0}%`);
+  const asciiOn = options.mode === 'ascii' && !!options.ascii;
+  const asciiOpts: AsciiOptions | null = asciiOn
+    ? {
+        columns: options.ascii!.columns,
+        charset: getAsciiCharset(options.ascii!.charsetId),
+        color: options.ascii!.color,
+        invert: options.ascii!.invert,
+      }
+    : null;
+  const engine = !asciiOn && options.engine && options.engine !== 'fsr' ? options.engine : null;
+  log(
+    'info',
+    `引擎: ${asciiOn ? 'ASCII 字符画转换' : engine ?? '算法增强 (CAS/FSR)'}` +
+      `${asciiOn ? '' : `, 锐度 ${(options.sharpness * 100) | 0}%`}`,
+  );
+  if (asciiOn && options.ascii) {
+    log(
+      'info',
+      `ASCII 参数: ${options.ascii.columns} 列, 字符集 ${options.ascii.charsetId}` +
+        `, ${options.ascii.color ? '彩色' : '单色'}${options.ascii.invert ? ', 反相(白底黑字)' : ''}`,
+    );
+  }
   const aiScale = engine ? getModel(engine).scale : null;
   const keepRes = !!engine && !!options.aiKeepResolution;
-  const effScale = (keepRes ? 1 : aiScale ?? options.scale) as number;
+  const effScale = (asciiOn ? 1 : keepRes ? 1 : aiScale ?? options.scale) as number;
 
   const inW = videoTrack.displayWidth;
   const inH = videoTrack.displayHeight;
@@ -175,7 +200,7 @@ export async function enhanceVideo(
     target: new BufferTarget(),
   });
 
-  const interpFactor = options.interpolation === 'x4' ? 4 : options.interpolation === 'x2' ? 2 : 0;
+  const interpFactor = asciiOn ? 0 : options.interpolation === 'x4' ? 4 : options.interpolation === 'x2' ? 2 : 0;
   const interpOn = interpFactor > 0;
   const outFps = interpOn ? fps * interpFactor : fps;
   const bitrate = Math.min(100e6, Math.max(2e6, Math.round(outW * outH * outFps * 0.12)));
@@ -238,7 +263,7 @@ export async function enhanceVideo(
       onProgress({ phase: 'model', modelStage, modelLoaded, modelTotal, processed: 0, total: totalFrames });
     });
   }
-  const enhancer = engine ? null : await FrameEnhancer.create();
+  const enhancer = engine || asciiOn ? null : await FrameEnhancer.create();
   const aiEp = ai?.ep;
   const sink = new VideoSampleSink(videoTrack);
   const dw = videoTrack.displayWidth;
@@ -269,14 +294,17 @@ export async function enhanceVideo(
 
   const ema = (old: number, v: number) => (old === 0 ? v : old * 0.8 + v * 0.2);
 
-  const runEnhance = async (src: OffscreenCanvas): Promise<OffscreenCanvas> =>
-    ai
-      ? ai.processCanvas(src, { halfInput: options.aiHalfInput, keepResolution: options.aiKeepResolution })
-      : enhancer!.processFrame(src, {
-          scale: options.scale,
-          sharpness: options.sharpness,
-          allowBlackFrames: options.allowBlackFrames,
-        });
+  const runEnhance = async (src: OffscreenCanvas): Promise<OffscreenCanvas> => {
+    if (asciiOpts) return asciiConvert(src, asciiOpts);
+    if (ai) {
+      return ai.processCanvas(src, { halfInput: options.aiHalfInput, keepResolution: options.aiKeepResolution });
+    }
+    return enhancer!.processFrame(src, {
+      scale: options.scale,
+      sharpness: options.sharpness,
+      allowBlackFrames: options.allowBlackFrames,
+    });
+  };
 
   // keepRes 缩回源分辨率与 4K 上限对普通/插帧两条路径统一生效
   const finalizeFrame = (canvas: OffscreenCanvas): OffscreenCanvas => {

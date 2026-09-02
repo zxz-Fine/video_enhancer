@@ -286,6 +286,57 @@ if (keepResResult.fail || keepResResult.mad > 8) {
   process.exitCode = 1;
 }
 
+// ASCII conversion: 输出尺寸=源、帧数一致、画面含可见字符（非全黑）
+const asciiResult = await page.evaluate(
+  async ({ b64 }) => {
+    const { enhanceVideo } = await import('/src/enhance.ts');
+    const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+    const file = new File([bytes], 'ascii.mp4', { type: 'video/mp4' });
+    const res = await enhanceVideo(
+      {
+        file,
+        scale: 1,
+        sharpness: 0,
+        mode: 'ascii',
+        ascii: { columns: 80, charsetId: 'classic', color: false, invert: false },
+      },
+      () => {},
+      () => false,
+    );
+    const mb = await import('/node_modules/mediabunny/dist/modules/src/index.js');
+    const input = new mb.Input({
+      formats: mb.ALL_FORMATS,
+      source: new mb.BlobSource(new Blob([new Uint8Array(await res.blob.arrayBuffer())])),
+    });
+    const vt = await input.getPrimaryVideoTrack();
+    const sink = new mb.VideoSampleSink(vt);
+    let meanLum = 0;
+    let n = 0;
+    for await (const s of sink.samples()) {
+      const c = new OffscreenCanvas(s.displayWidth, s.displayHeight);
+      s.draw(c.getContext('2d'), 0, 0, s.displayWidth, s.displayHeight);
+      const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+      let sum = 0;
+      for (let i = 0; i < d.length; i += 4 * 37) sum += 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
+      meanLum += sum / (d.length / 4 / 37);
+      n++;
+      s.close();
+      if (n >= 4) break;
+    }
+    return { w: res.width, h: res.height, frames: res.processedFrames, meanLum: Math.round(meanLum / n) };
+  },
+  { b64: shortB64 },
+);
+console.log('ASCII:', asciiResult);
+if (asciiResult.w !== 320 || asciiResult.h !== 240 || asciiResult.frames !== 8) {
+  console.log('ASCII TEST FAIL (尺寸/帧数不符)');
+  process.exitCode = 1;
+}
+if (asciiResult.meanLum < 3) {
+  console.log('ASCII TEST FAIL (画面近乎全黑，字符未绘制)');
+  process.exitCode = 1;
+}
+
 // Interpolation x2 (RIFE) — 160x120、4 帧：RIFE CPU 推理是 e2e 最大耗时项，
 // 120 非 32 倍数可顺带覆盖 padding 修复路径
 const interpB64 = await page.evaluate(async () => {
