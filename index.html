@@ -106,6 +106,21 @@
       .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
       .compare .cell video { width: 100%; border-radius: 8px; background: #000; max-height: 420px; }
       .compare .cell .cap { font-size: 0.85rem; color: var(--muted); margin-bottom: 6px; }
+      #loupe-panel { margin-top: 18px; }
+      .loupe-head { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+      .loupe-head .group-label { margin: 0; }
+      #loupe-canvas {
+        width: 100%; display: block; background: #000;
+        border: 1px solid var(--border); border-radius: 8px;
+        cursor: grab; touch-action: none;
+      }
+      #loupe-canvas:active { cursor: grabbing; }
+      .loupe-hint { color: var(--muted); font-size: 0.8rem; margin: 6px 0 0; }
+      #loupe-play {
+        padding: 6px 14px; font-size: 0.85rem;
+        background: transparent; color: var(--text);
+        border: 1px solid var(--border); border-radius: 6px;
+      }
       #download-link {
         display: inline-block; margin-top: 18px; padding: 11px 26px;
         background: var(--accent); color: #fff; text-decoration: none;
@@ -175,6 +190,17 @@
           <div class="control-group">
             <label class="group-label">锐化强度：<span id="sharpness-value">60%</span></label>
             <input id="sharpness" type="range" min="0" max="100" value="60" />
+            <div style="margin-top: 10px">
+              <label class="group-label">插帧（RIFE · 独立显存约 19MB）</label>
+              <div class="radio-group" id="interp-group">
+                <label>
+                  <input type="radio" name="interp" value="none" checked /><span>关闭</span>
+                </label>
+                <label>
+                  <input type="radio" name="interp" value="x2" /><span>2x 帧率</span>
+                </label>
+              </div>
+            </div>
             <small id="ai-note" style="display: none; color: var(--muted)"
               >AI 引擎自带放大倍数与锐化，强度滑条不生效</small
             >
@@ -186,7 +212,7 @@
               <br />
               <label style="font-size: 0.85rem; cursor: pointer; user-select: none">
                 <input id="ai-half-input" type="checkbox" />
-                性能模式（半分辨率推理 · 快约 4 倍 · 画质略降）
+                性能模式（半分辨率推理 · 快约 4 倍 · 与"保持原分辨率"互斥）
               </label>
             </div>
           </div>
@@ -222,6 +248,23 @@
           </div>
         </div>
         <p id="result-info"></p>
+        <div id="loupe-panel">
+          <div class="loupe-head">
+            <label class="group-label">1:1 放大对比（左右为同一内容区域，拖动画面移动观察点）</label>
+            <div class="radio-group" id="loupe-zoom-group">
+              <label><input type="radio" name="loupe-zoom" value="1" /><span>1x</span></label>
+              <label><input type="radio" name="loupe-zoom" value="2" checked /><span>2x</span></label>
+              <label><input type="radio" name="loupe-zoom" value="4" /><span>4x</span></label>
+              <label><input type="radio" name="loupe-zoom" value="8" /><span>8x</span></label>
+            </div>
+            <button id="loupe-play" type="button">▶ 同步播放</button>
+          </div>
+          <canvas id="loupe-canvas" width="880" height="550"></canvas>
+          <p class="loupe-hint">
+            放大倍数基于原始视频像素；增强侧按其更高源分辨率绘制，高频差异需在此视图观察。
+            整体缩略对比看不出效果是正常的——超分/锐化的增益都在像素级。
+          </p>
+        </div>
         <a id="download-link" download>下载增强后的 MP4</a>
       </div>
     </div>

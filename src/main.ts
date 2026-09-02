@@ -32,6 +32,9 @@ const computeBadge = $('#compute-badge');
 const engineBadge = $('#engine-badge');
 const logPanel = $('#log-panel');
 const logToggle = $('#log-toggle') as HTMLButtonElement;
+const loupeCanvas = $('#loupe-canvas') as HTMLCanvasElement;
+const loupePlayBtn = $('#loupe-play') as HTMLButtonElement;
+const halfInputEl = $('#ai-half-input') as HTMLInputElement;
 
 function badge(cls: string, text: string, el: HTMLElement): void {
   el.className = `badge ${cls}`;
@@ -137,6 +140,14 @@ engineRadios.forEach((r) => {
   });
 });
 
+// 性能模式与保持原分辨率互斥：半分辨率推理先缩小源，AI 修复再缩回，叠加等于双重抵消
+aiKeepRes.addEventListener('change', () => {
+  if (aiKeepRes.checked) halfInputEl.checked = false;
+});
+halfInputEl.addEventListener('change', () => {
+  if (halfInputEl.checked) aiKeepRes.checked = false;
+});
+
 cancelBtn.addEventListener('click', () => {
   cancelFlag = true;
   cancelBtn.disabled = true;
@@ -152,8 +163,12 @@ startBtn.addEventListener('click', async () => {
   }
   const sharpness = Number(sharpSlider.value) / 100;
   const engine = currentEngine();
+  let interpolation: 'none' | 'x2' = 'none';
+  for (const r of document.querySelectorAll<HTMLInputElement>('input[name="interp"]')) {
+    if (r.checked) interpolation = r.value as 'none' | 'x2';
+  }
   const aiKeepResolution = engine !== 'fsr' ? aiKeepRes.checked : false;
-  const aiHalfInput = engine !== 'fsr' ? (document.getElementById('ai-half-input') as HTMLInputElement).checked : false;
+  const aiHalfInput = engine !== 'fsr' ? halfInputEl.checked : false;
 
   running = true;
   cancelFlag = false;
@@ -174,7 +189,7 @@ startBtn.addEventListener('click', async () => {
 
   try {
     const result: EnhanceResult = await enhanceVideo(
-      { file: selectedFile, scale, sharpness, engine, aiKeepResolution, aiHalfInput },
+      { file: selectedFile, scale, sharpness, engine, aiKeepResolution, aiHalfInput, interpolation },
       ({ phase, processed, total, modelStage, aiEp, frameMs, inferMs, encodeMs }) => {
         if (phase === 'analyze') {
           statusText.textContent = '分析视频中…';
@@ -222,6 +237,7 @@ startBtn.addEventListener('click', async () => {
       `文件大小 ${(result.blob.size / 1048576).toFixed(1)} MB`;
     progressWrap.style.display = 'none';
     resultSection.style.display = 'block';
+    resetLoupe();
   } catch (err) {
     progressWrap.style.display = 'none';
     const msg = err instanceof Error ? err.message : String(err);
@@ -232,3 +248,119 @@ startBtn.addEventListener('click', async () => {
     cancelBtn.disabled = true;
   }
 });
+
+// ===== 1:1 放大镜对比 =====
+// 左半显示原始视频、右半显示增强视频的同一内容区域，按原始视频像素放大。
+// 超分/锐化的增益是像素级的，缩略对比必然看不出，必须 1:1 观察。
+let loupeZoom = 2;
+let loupeCenterX = 0.5;
+let loupeCenterY = 0.5;
+let loupePointerId: number | null = null;
+
+function resetLoupe(): void {
+  loupeCenterX = 0.5;
+  loupeCenterY = 0.5;
+  loupePlaying = false;
+  loupePlayBtn.textContent = '▶ 同步播放';
+}
+
+for (const r of document.querySelectorAll<HTMLInputElement>('input[name="loupe-zoom"]')) {
+  r.addEventListener('change', () => {
+    if (r.checked) loupeZoom = Number(r.value);
+  });
+}
+
+let loupePlaying = false;
+
+function syncLoupePlayback(): void {
+  if (Math.abs(enhancedVideo.currentTime - originalVideo.currentTime) > 0.04) {
+    enhancedVideo.currentTime = originalVideo.currentTime;
+  }
+}
+
+loupePlayBtn.addEventListener('click', async () => {
+  if (loupePlaying) {
+    originalVideo.pause();
+    enhancedVideo.pause();
+  } else {
+    syncLoupePlayback();
+    try {
+      await Promise.all([originalVideo.play(), enhancedVideo.play()]);
+    } catch {
+      /* 自动播放被拦截时忽略 */
+    }
+  }
+});
+
+originalVideo.addEventListener('play', () => {
+  loupePlaying = true;
+  loupePlayBtn.textContent = '⏸ 暂停';
+});
+originalVideo.addEventListener('pause', () => {
+  loupePlaying = false;
+  loupePlayBtn.textContent = '▶ 同步播放';
+});
+
+function loupeMoveTo(e: PointerEvent): void {
+  const rect = loupeCanvas.getBoundingClientRect();
+  loupeCenterX = Math.min(Math.max((e.clientX - rect.left) / rect.width, 0), 1);
+  loupeCenterY = Math.min(Math.max((e.clientY - rect.top) / rect.height, 0), 1);
+}
+
+loupeCanvas.addEventListener('pointerdown', (e) => {
+  loupePointerId = e.pointerId;
+  loupeCanvas.setPointerCapture(e.pointerId);
+  loupeMoveTo(e);
+});
+loupeCanvas.addEventListener('pointermove', (e) => {
+  if (loupePointerId === e.pointerId) loupeMoveTo(e);
+});
+const loupeRelease = (e: PointerEvent) => {
+  if (loupePointerId === e.pointerId) loupePointerId = null;
+};
+loupeCanvas.addEventListener('pointerup', loupeRelease);
+loupeCanvas.addEventListener('pointercancel', loupeRelease);
+
+function drawLoupe(): void {
+  if (resultSection.style.display !== 'none') {
+    const ow = originalVideo.videoWidth;
+    const oh = originalVideo.videoHeight;
+    const ew = enhancedVideo.videoWidth;
+    const eh = enhancedVideo.videoHeight;
+    if (ow > 0 && oh > 0 && ew > 0 && eh > 0) {
+      syncLoupePlayback();
+      const ctx = loupeCanvas.getContext('2d')!;
+      const cw = loupeCanvas.width;
+      const ch = loupeCanvas.height;
+      // 观察区域大小（原始视频像素），放大后铺满画布
+      const rw = Math.min(ow, cw / loupeZoom);
+      const rh = Math.min(oh, ch / loupeZoom);
+      const sx = Math.min(Math.max(loupeCenterX * ow - rw / 2, 0), ow - rw);
+      const sy = Math.min(Math.max(loupeCenterY * oh - rh / 2, 0), oh - rh);
+      const k = ew / ow;
+      // 关闭平滑：最近邻呈现真实像素块，才能判断锐度差异
+      ctx.imageSmoothingEnabled = false;
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, cw, ch);
+      ctx.drawImage(originalVideo, sx, sy, rw, rh, 0, 0, cw / 2, ch);
+      ctx.drawImage(enhancedVideo, sx * k, sy * k, rw * k, rh * k, cw / 2, 0, cw / 2, ch);
+      ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(cw / 2 + 0.5, 0);
+      ctx.lineTo(cw / 2 + 0.5, ch);
+      ctx.stroke();
+      ctx.font = '14px sans-serif';
+      ctx.fillStyle = 'rgba(0,0,0,0.55)';
+      ctx.fillRect(8, 8, 58, 24);
+      ctx.fillRect(cw / 2 + 8, 8, 70, 24);
+      ctx.fillStyle = '#fff';
+      ctx.fillText('原始', 16, 25);
+      ctx.fillText('增强后', cw / 2 + 16, 25);
+    }
+  }
+  requestAnimationFrame(drawLoupe);
+}
+requestAnimationFrame(drawLoupe);
+
+resetLoupe();

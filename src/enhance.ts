@@ -16,6 +16,7 @@ import {
 } from 'mediabunny';
 import { FrameEnhancer, type ScaleFactor } from './gpu';
 import { AiEngine } from './ai';
+import { FrameInterpolator } from './interpolate';
 import { AI_MODELS, getModel } from './models';
 import { log } from './logger';
 
@@ -32,6 +33,8 @@ export interface EnhanceOptions {
   aiKeepResolution?: boolean;
   /** AI 引擎时：半分辨率推理（计算量降 4 倍，画质略降） */
   aiHalfInput?: boolean;
+  /** 插帧：'none' 或 'x2'（RIFE 运动插帧） */
+  interpolation?: 'none' | 'x2';
   /** 测试专用：允许全黑输出（headless 软渲染） */
   allowBlackFrames?: boolean;
 }
@@ -139,14 +142,16 @@ export async function enhanceVideo(
     target: new BufferTarget(),
   });
 
-  const bitrate = Math.min(100e6, Math.max(2e6, Math.round(outW * outH * fps * 0.12)));
-  log('info', `输出: ${outW}x${outH}, 编码 ${codec}, 码率 ${(bitrate / 1e6).toFixed(1)}Mbps`);
+  const interpOn = options.interpolation === 'x2';
+  const outFps = interpOn ? fps * 2 : fps;
+  const bitrate = Math.min(100e6, Math.max(2e6, Math.round(outW * outH * outFps * 0.12)));
+  log('info', `输出: ${outW}x${outH} @ ${outFps.toFixed(1)}fps, 编码 ${codec}, 码率 ${(bitrate / 1e6).toFixed(1)}Mbps`);
   const videoSource = new VideoSampleSource({
     codec,
     quality: new Quality({ bitrate }),
     latencyMode: 'quality',
   });
-  output.addVideoTrack(videoSource, { frameRate: fps });
+  output.addVideoTrack(videoSource, { frameRate: outFps });
 
   let audioSource: AudioSampleSource | null = null;
   const audioTrack = await input.getPrimaryAudioTrack();
@@ -203,6 +208,11 @@ export async function enhanceVideo(
   const stageCtx = stageCanvas.getContext('2d')!;
 
   const vBase = await videoTrack.getFirstTimestamp();
+  const inter = interpOn ? await FrameInterpolator.load() : null;
+  const frameDur = 1 / outFps;
+  let emitted = 0;
+  let prevCanvas: OffscreenCanvas | null = null;
+  let prevRgba: Uint8ClampedArray | null = null;
   let processed = 0;
   let frameMs = 0;
   let lastFrameAt = 0;
@@ -232,7 +242,7 @@ export async function enhanceVideo(
           allowBlackFrames: options.allowBlackFrames,
         });
       }
-      const t1 = performance.now();
+      const t1Proc = performance.now();
       if (ai && keepRes && (canvas.width !== dw || canvas.height !== dh)) {
         const back = new OffscreenCanvas(dw, dh);
         back.getContext('2d')!.drawImage(canvas, 0, 0, dw, dh);
@@ -250,23 +260,58 @@ export async function enhanceVideo(
           log('info', `输出超过 4K，已限制到 ${cw}x${ch}（避免 5K+ 软件编码过慢）`);
         }
       }
-      const outTs = Math.max(0, sample.timestamp - vBase);
-      const out = new VideoSample(canvas, {
-        timestamp: outTs,
-        duration: sample.duration > 0 ? sample.duration : 1 / fps,
-      });
-      stage = 'video-encode';
-      try {
-        await videoSource.add(out);
-      } finally {
-        stage = 'video-decode';
+      const t1 = performance.now();
+      if (inter) {
+        const curRgba = canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height).data;
+        if (prevCanvas && prevRgba) {
+          const mid = await inter.interpolate(prevRgba, curRgba, canvas.width, canvas.height, 0.5);
+          const midCanvas = new OffscreenCanvas(canvas.width, canvas.height);
+          midCanvas.getContext('2d')!.putImageData(new ImageData(mid, canvas.width, canvas.height), 0, 0);
+          stage = 'video-encode';
+          try {
+            const o1 = new VideoSample(prevCanvas, { timestamp: emitted * frameDur, duration: frameDur });
+            await videoSource.add(o1);
+            o1.close();
+            const o2 = new VideoSample(midCanvas, { timestamp: (emitted + 1) * frameDur, duration: frameDur });
+            await videoSource.add(o2);
+            o2.close();
+          } finally {
+            stage = 'video-decode';
+          }
+          emitted += 2;
+        } else {
+          stage = 'video-encode';
+          try {
+            const o1 = new VideoSample(canvas, { timestamp: emitted * frameDur, duration: frameDur });
+            await videoSource.add(o1);
+            o1.close();
+          } finally {
+            stage = 'video-decode';
+          }
+          emitted += 1;
+        }
+        prevCanvas = canvas;
+        prevRgba = new Uint8ClampedArray(curRgba.buffer);
+      } else {
+        const outTs = Math.max(0, sample.timestamp - vBase);
+        const out = new VideoSample(canvas, {
+          timestamp: outTs,
+          duration: sample.duration > 0 ? sample.duration : 1 / fps,
+        });
+        stage = 'video-encode';
+        try {
+          await videoSource.add(out);
+        } finally {
+          stage = 'video-decode';
+        }
+        out.close();
+        sample.close();
       }
-      const t2 = performance.now();
-      inferMs = inferMs === 0 ? t1 - t0 : inferMs * 0.8 + (t1 - t0) * 0.2;
-      encodeMs = encodeMs === 0 ? t2 - t1 : encodeMs * 0.8 + (t2 - t1) * 0.2;
-      out.close();
-      sample.close();
+      if (!inter) sample.close();
       processed++;
+      const t2 = performance.now();
+      inferMs = inferMs === 0 ? t1Proc - t0 : inferMs * 0.8 + (t1Proc - t0) * 0.2;
+      encodeMs = encodeMs === 0 ? t2 - t1 : encodeMs * 0.8 + (t2 - t1) * 0.2;
       const now = performance.now();
       if (lastFrameAt > 0) frameMs = frameMs * 0.8 + (now - lastFrameAt) * 0.2;
       lastFrameAt = now;
@@ -275,8 +320,18 @@ export async function enhanceVideo(
       }
       onProgress({ phase: 'video', processed, total: totalFrames, aiEp, frameMs, inferMs, encodeMs });
       if (processed % 10 === 0) {
-        log('info', `帧 ${processed}: 推理 ${(inferMs / 1000).toFixed(2)}s + 编码 ${(encodeMs / 1000).toFixed(2)}s`);
+        log('info', `源帧 ${processed}/${totalFrames} 已出片 ${emitted} 帧, 推理 ${(inferMs / 1000).toFixed(2)}s + 编码 ${(encodeMs / 1000).toFixed(2)}s`);
       }
+    }
+    if (inter && prevCanvas) {
+      const o = new VideoSample(prevCanvas, { timestamp: emitted * frameDur, duration: frameDur });
+      stage = 'video-encode';
+      try {
+        await videoSource.add(o);
+      } finally {
+        stage = 'video-decode';
+      }
+      o.close();
     }
   } catch (err) {
     if (err instanceof Error && err.message === '已取消。') throw err;
@@ -301,6 +356,7 @@ export async function enhanceVideo(
     videoSource.close();
     enhancer?.destroy();
     ai?.destroy();
+    inter?.destroy();
   }
 
   await output.finalize();

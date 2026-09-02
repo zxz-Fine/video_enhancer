@@ -146,6 +146,11 @@ export class AiEngine {
           const r = data[i];
           const g = data[stride + i];
           const b = data[stride * 2 + i];
+          // NaN 参与任何比较都为 false，会静默通过下面的阈值检查，必须显式排除
+          if (!Number.isFinite(r) || !Number.isFinite(g) || !Number.isFinite(b)) {
+            ok = false;
+            continue;
+          }
           const mean = (r + g + b) / 3;
           const spread = Math.max(Math.abs(r - mean), Math.abs(g - mean), Math.abs(b - mean));
           if (spread > inputRange * 0.08 || Math.abs(mean - grey) > inputRange * 0.2) {
@@ -183,8 +188,12 @@ export class AiEngine {
     const img = ctx.getImageData(0, 0, w, h);
 
     const useTile = w > this.tile || h > this.tile;
-    const targetW = runOpts?.keepResolution ? src.width : w * this.model.scale;
-    const targetH = runOpts?.keepResolution ? src.height : h * this.model.scale;
+    // 瓦片按模型倍数拼装，keepResolution 最后统一缩回源尺寸
+    const scale = this.model.scale;
+    const upW = w * scale;
+    const upH = h * scale;
+    const targetW = runOpts?.keepResolution ? src.width : upW;
+    const targetH = runOpts?.keepResolution ? src.height : upH;
 
     if (!useTile) {
       const out = await this.inferTensor(img.data, w, h);
@@ -202,8 +211,8 @@ export class AiEngine {
       return outCanvas;
     }
 
-    const sum = new Float32Array(targetW * targetH * 3);
-    const wsum = new Float32Array(targetW * targetH);
+    const sum = new Float32Array(upW * upH * 3);
+    const wsum = new Float32Array(upW * upH);
 
     const ov = 16;
     const tileScale = this.model.scale;
@@ -231,7 +240,7 @@ export class AiEngine {
           outTile.h,
           sum,
           wsum,
-          targetW,
+          upW,
           0,
           0,
           outTile.w,
@@ -246,9 +255,9 @@ export class AiEngine {
         );
       }
     }
-    const outCanvas = new OffscreenCanvas(targetW, targetH);
-    const finalRgba = new Uint8ClampedArray(targetW * targetH * 4);
-    for (let i = 0; i < targetW * targetH; i++) {
+    const assembled = new OffscreenCanvas(upW, upH);
+    const finalRgba = new Uint8ClampedArray(upW * upH * 4);
+    for (let i = 0; i < upW * upH; i++) {
       const w = wsum[i];
       finalRgba[i * 4] = w > 0 ? sum[i * 3] / w : 0;
       finalRgba[i * 4 + 1] = w > 0 ? sum[i * 3 + 1] / w : 0;
@@ -258,17 +267,24 @@ export class AiEngine {
     if (import.meta.env.DEV) {
       let zeros = 0;
       let firstZero: number[] | null = null;
-      for (let yy = 0; yy < targetH; yy += 3) {
-        for (let xx = 0; xx < targetW; xx += 7) {
-          if (wsum[yy * targetW + xx] === 0) {
+      for (let yy = 0; yy < upH; yy += 3) {
+        for (let xx = 0; xx < upW; xx += 7) {
+          if (wsum[yy * upW + xx] === 0) {
             zeros++;
             if (!firstZero) firstZero = [xx, yy];
           }
         }
       }
-      if (zeros > 0) console.log('[dbg] wsum==0 count:', zeros, 'first:', firstZero, 'target:', targetW, targetH);
+      if (zeros > 0) console.log('[dbg] wsum==0 count:', zeros, 'first:', firstZero, 'target:', upW, upH);
     }
-    outCanvas.getContext('2d')!.putImageData(new ImageData(finalRgba, targetW, targetH), 0, 0);
+    assembled.getContext('2d')!.putImageData(new ImageData(finalRgba, upW, upH), 0, 0);
+    if (upW === targetW && upH === targetH) {
+      return assembled;
+    }
+    const outCanvas = new OffscreenCanvas(targetW, targetH);
+    const octx = outCanvas.getContext('2d')!;
+    octx.imageSmoothingEnabled = true;
+    octx.drawImage(assembled, 0, 0, targetW, targetH);
     return outCanvas;
   }
 
