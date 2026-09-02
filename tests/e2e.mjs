@@ -331,7 +331,8 @@ const asciiResult = await page.evaluate(
       s.close();
       if (n >= 4) break;
     }
-    return { w: res.width, h: res.height, frames: res.processedFrames, meanLum: Math.round(meanLum / n) };
+    const dur = await input.computeDuration();
+    return { w: res.width, h: res.height, frames: res.processedFrames, meanLum: Math.round(meanLum / n), dur: +dur.toFixed(3) };
   },
   { b64: shortB64 },
 );
@@ -342,6 +343,10 @@ if (asciiResult.w !== 320 || asciiResult.h !== 240 || asciiResult.frames !== 8) 
 }
 if (asciiResult.meanLum < 3) {
   console.log('ASCII TEST FAIL (画面近乎全黑，字符未绘制)');
+  process.exitCode = 1;
+}
+if (Math.abs(asciiResult.dur - 8 / 30) > 0.05) {
+  console.log('ASCII TEST FAIL (输出时长塌缩:', asciiResult.dur, ')');
   process.exitCode = 1;
 }
 

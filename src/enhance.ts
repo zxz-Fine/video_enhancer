@@ -76,6 +76,67 @@ function roundEven(n: number): number {
   return r % 2 === 0 ? r : r - 1;
 }
 
+// 部分平台硬件编码器不保留输入时间戳（输出全 0 或乱序），会导致成片时长塌缩。
+// 编码 5 帧已知时间戳做自检，不合格则回退软件编码。
+async function hwEncoderPreservesTimestamps(codec: VideoCodec): Promise<boolean> {
+  const probeConfigs: Partial<Record<VideoCodec, { codec: string }>> = {
+    avc: { codec: 'avc1.42001e' },
+    vp9: { codec: 'vp09.00.10.08' },
+    av1: { codec: 'av01.0.04M.08' },
+  };
+  const probe = probeConfigs[codec];
+  if (!probe) return false;
+  const w = 160;
+  const h = 120;
+  const VE = (globalThis as { VideoEncoder?: any }).VideoEncoder;
+  const VF = (globalThis as { VideoFrame?: any }).VideoFrame;
+  if (!VE || !VF) return false;
+  const out: number[] = [];
+  let enc: any = null;
+  try {
+    const baseConfig = {
+      codec: probe.codec,
+      width: w,
+      height: h,
+      bitrate: 400_000,
+      framerate: 30,
+      hardwareAcceleration: 'prefer-hardware',
+    };
+    const support = await VE.isConfigSupported(baseConfig);
+    if (!support?.supported) return false;
+    enc = new VE({
+      output: (chunk: { timestamp: number }) => out.push(chunk.timestamp),
+      error: () => {},
+    });
+    enc.configure(baseConfig);
+    for (let i = 0; i < 5; i++) {
+      const data = new Uint8Array(w * h * 4);
+      data.fill(30 + i * 40);
+      const frame = new VF(data, {
+        format: 'RGBA',
+        codedWidth: w,
+        codedHeight: h,
+        timestamp: Math.round((i / 30) * 1e6),
+        duration: 33333,
+      });
+      enc.encode(frame);
+      frame.close();
+    }
+    await enc.flush();
+  } catch {
+    return false;
+  } finally {
+    try {
+      enc?.close();
+    } catch {
+      /* 可能已关闭 */
+    }
+  }
+  if (out.length < 5) return false;
+  const expected = [0, 33333, 66667, 100000, 133333];
+  return out.every((t, i) => Number.isFinite(t) && Math.abs(t - expected[i]) < 25000);
+}
+
 const CODEC_LABELS: Record<string, string> = {
   avc: 'H.264',
   hevc: 'HEVC (H.265)',
@@ -181,11 +242,17 @@ export async function enhanceVideo(
         break;
       }
     }
+    // 编码能力 ≠ 时间戳可靠：硬编输出时间戳若与输入不符，成片时长会塌缩
+    if (hwActive && !(await hwEncoderPreservesTimestamps(codec!))) {
+      log('warn', '硬件编码器时间戳自检未通过（输出时间戳与输入不符）→ 回退软件编码');
+      hwActive = false;
+      codec = null;
+    }
     log(
       'info',
       hwActive
         ? `硬件编码可用（${codec}），将使用显卡固定功能编码器`
-        : '硬件编码不可用（无可用编码器或驱动限制），回退软件编码',
+        : '硬件编码不可用（无可用编码器、驱动限制或时间戳不可靠），回退软件编码',
     );
   }
   let codecFallback = false;
@@ -296,6 +363,7 @@ export async function enhanceVideo(
   let encodeMs = 0;
   let capped4kLogged = false;
   let stage: 'video-decode' | 'video-encode' = 'video-decode';
+  let lastOutEnd = 0;
 
   const ema = (old: number, v: number) => (old === 0 ? v : old * 0.8 + v * 0.2);
 
@@ -402,6 +470,7 @@ export async function enhanceVideo(
           itInfer += performance.now() - t;
           prevEnhanced = finalizeFrame(enhanced);
           emitted += interpFactor;
+          lastOutEnd = emitted * frameDur;
         }
         prevSrcRgba = curRgba;
       } else {
@@ -412,6 +481,7 @@ export async function enhanceVideo(
         await encodeOut(finalC, srcTs, srcDur);
         itInfer += t1 - t0;
         itEncode += performance.now() - t1;
+        lastOutEnd = Math.max(lastOutEnd, srcTs + srcDur);
       }
 
       inferMs = ema(inferMs, itInfer);
@@ -432,6 +502,7 @@ export async function enhanceVideo(
     }
     if (inter && prevEnhanced) {
       await encodeOut(prevEnhanced, emitted * frameDur, frameDur);
+      lastOutEnd = (emitted + 1) * frameDur;
     }
   } catch (err) {
     if (err instanceof Error && err.message === '已取消。') throw err;
@@ -464,6 +535,15 @@ export async function enhanceVideo(
   await output.finalize();
   const buffer = output.target.buffer;
   if (!buffer) throw new Error('输出缓冲为空。');
+
+  log('info', `输出完成: 处理 ${processed}/${totalFrames} 源帧, 成片 ${emitted || processed} 帧, 视频时长约 ${lastOutEnd.toFixed(1)}s`);
+  if (processed < totalFrames) {
+    log(
+      'warn',
+      `⚠ 源帧流提前结束（解码 ${processed}/${totalFrames} 帧），输出时长会短于源。` +
+        `可能是源文件在此浏览器上解码受限，可先转码为 H.264：ffmpeg -i 输入.mp4 -c:v libx264 -crf 18 -pix_fmt yuv420p 输出.mp4`,
+    );
+  }
 
   onProgress({ phase: 'done', processed, total: totalFrames });
 
