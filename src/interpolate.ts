@@ -11,6 +11,7 @@ export class FrameInterpolator {
   private inputNames: readonly string[];
   private gridCache = new Map<string, ort.Tensor>();
   private rebuiltOnCpu = false;
+  private loggedPad = '';
 
   private constructor(session: ort.InferenceSession) {
     this.session = session;
@@ -133,6 +134,10 @@ export class FrameInterpolator {
     // RIFE 的 IfNet 有 5 级下采样，W/H 必须能被 32 整除，否则 ONNX 图内形状不匹配直接报错
     const pw = Math.ceil(w / 32) * 32;
     const ph = Math.ceil(h / 32) * 32;
+    if ((pw !== w || ph !== h) && this.loggedPad !== `${w}x${h}`) {
+      this.loggedPad = `${w}x${h}`;
+      log('ai', `RIFE: 输入 ${w}x${h} 非 32 倍数 → padding 到 ${pw}x${ph} 推理后裁回`);
+    }
     const ppx = pw * ph;
     const f0 = new Float32Array(3 * ppx);
     const f1 = new Float32Array(3 * ppx);

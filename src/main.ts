@@ -169,6 +169,7 @@ startBtn.addEventListener('click', async () => {
   }
   const aiKeepResolution = engine !== 'fsr' ? aiKeepRes.checked : false;
   const aiHalfInput = engine !== 'fsr' ? halfInputEl.checked : false;
+  const hwEncode = ($('#hw-encode') as HTMLInputElement).checked;
 
   running = true;
   cancelFlag = false;
@@ -189,8 +190,8 @@ startBtn.addEventListener('click', async () => {
 
   try {
     const result: EnhanceResult = await enhanceVideo(
-      { file: selectedFile, scale, sharpness, engine, aiKeepResolution, aiHalfInput, interpolation },
-      ({ phase, processed, total, modelStage, aiEp, frameMs, inferMs, encodeMs }) => {
+      { file: selectedFile, scale, sharpness, engine, aiKeepResolution, aiHalfInput, interpolation, hwEncode },
+      ({ phase, processed, total, modelStage, aiEp, frameMs, inferMs, interpMs, encodeMs }) => {
         if (phase === 'analyze') {
           statusText.textContent = '分析视频中…';
           progressBar.style.width = '5%';
@@ -208,6 +209,7 @@ startBtn.addEventListener('click', async () => {
           const pct = total > 0 ? Math.min(99, Math.round((processed / total) * 100)) : 0;
           const parts: string[] = [];
           if (inferMs && inferMs > 0) parts.push(`推理 ${(inferMs / 1000).toFixed(2)}s`);
+          if (interpMs && interpMs > 0) parts.push(`插帧 ${(interpMs / 1000).toFixed(2)}s`);
           if (encodeMs && encodeMs > 0) parts.push(`编码 ${(encodeMs / 1000).toFixed(2)}s`);
           const speed = parts.length ? ` · ${parts.join(' + ')} /帧` : frameMs && frameMs > 0 ? ` · ${(frameMs / 1000).toFixed(1)}s/帧` : '';
           statusText.textContent = `处理中 ${processed}/${total} 帧 (${pct}%)${speed}`;
