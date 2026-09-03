@@ -227,7 +227,9 @@ const animeResult = await page.evaluate(
     const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
     const file = new File([bytes], 'anime.mp4', { type: 'video/mp4' });
     const res = await enhanceVideo(
-      { file, scale: 1, sharpness: 0.6, engine: 'realesr-animevideov3', allowBlackFrames: true },
+      // aiForceWasm：SwiftShader 软 WebGPU 跑 4x 大模型单帧 70s+，e2e 只验管线正确性，走 wasm；
+      // WebGPU 正确性由 probe-new-model.mjs 的 webgpu 灰色探针覆盖
+      { file, scale: 1, sharpness: 0.6, engine: 'realesr-animevideov3', allowBlackFrames: true, aiForceWasm: true },
       () => {},
       () => false,
     );

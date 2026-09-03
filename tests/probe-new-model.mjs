@@ -5,6 +5,7 @@ import { createServer } from 'vite';
 const exe = process.env.HOME + '/.cache/ms-playwright/chromium-1234/chrome-linux64/chrome';
 const modelFile = process.argv[2] ?? '/models/imdn-x2.onnx';
 const epArg = process.argv[3] ?? 'wasm';
+const probeSize = Number(process.env.SIZE ?? 0); // 额外跑一帧 SIZE×SIZE 计时（如 SIZE=320）
 const server = await createServer({ configFile: false, root: process.cwd(), server: { port: 5199, strictPort: true } });
 await server.listen();
 const browser = await chromium.launch({
@@ -16,7 +17,7 @@ const page = await browser.newPage();
 await page.goto('http://localhost:5199/');
 await page.waitForTimeout(800);
 const r = await page.evaluate(
-  async ({ modelFile, epArg }) => {
+  async ({ modelFile, epArg, probeSize }) => {
     const ort = epArg === 'webgpu'
       ? await import('/node_modules/onnxruntime-web/dist/ort.webgpu.bundle.min.mjs').catch(() => import('/node_modules/onnxruntime-web/dist/ort.all.bundle.min.mjs'))
       : await import('/node_modules/onnxruntime-web/dist/ort.wasm.bundle.min.mjs');
@@ -79,9 +80,18 @@ const r = await page.evaluate(
       const stride = t.dims[2] * t.dims[3];
       out.red_s1 = [t.data[c], t.data[stride + c], t.data[stride * 2 + c]].map((v) => +v.toFixed(3)).join(',');
     }
+    if (probeSize > 0) {
+      const W = probeSize;
+      const H = Math.round((probeSize * 3) / 4);
+      const px = W * H;
+      const a = new Float32Array(3 * px).fill(0.5);
+      const t0 = performance.now();
+      const t = (await session.run({ [inName]: new ort.Tensor('float32', a, [1, 3, H, W]) }))[outName];
+      out.big = { in: `${W}x${H}`, dims: t.dims.join('x'), ms: Math.round(performance.now() - t0) };
+    }
     return out;
   },
-  { modelFile, epArg },
+  { modelFile, epArg, probeSize },
 );
 console.log(JSON.stringify(r, null, 2));
 await browser.close();

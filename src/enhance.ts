@@ -40,6 +40,8 @@ export interface EnhanceOptions {
   interpolation?: 'none' | 'x2' | 'x4';
   /** 测试专用：允许全黑输出（headless 软渲染） */
   allowBlackFrames?: boolean;
+  /** 测试专用：跳过 WebGPU，直接 wasm 推理（SwiftShader 软渲染跑大模型极慢，e2e 提速） */
+  aiForceWasm?: boolean;
   /** 硬件编码加速：请求显卡固定功能编码器，浏览器/驱动不支持时自动回退软件 */
   hwEncode?: boolean;
   /** 功能模式：画质增强（默认）或 ASCII 字符画转换 */
@@ -348,9 +350,13 @@ export async function enhanceVideo(
   let ai: AiEngine | null = null;
   if (engine) {
     const tAi = performance.now();
-    ai = await AiEngine.load(engine, (modelStage, modelLoaded, modelTotal) => {
-      onProgress({ phase: 'model', modelStage, modelLoaded, modelTotal, processed: 0, total: totalFrames });
-    });
+    ai = await AiEngine.load(
+      engine,
+      (modelStage, modelLoaded, modelTotal) => {
+        onProgress({ phase: 'model', modelStage, modelLoaded, modelTotal, processed: 0, total: totalFrames });
+      },
+      { forceWasm: options.aiForceWasm },
+    );
     log('info', `AI 引擎加载总耗时 ${((performance.now() - tAi) / 1000).toFixed(1)}s，后端=${ai.ep}`);
   }
   let enhancer: FrameEnhancer | null = null;
@@ -516,6 +522,7 @@ export async function enhanceVideo(
         await encodeOut(finalC, srcTs, srcDur);
         itInfer += t1 - t0;
         itEncode += performance.now() - t1;
+        emitted += 1;
         lastOutEnd = Math.max(lastOutEnd, srcTs + srcDur);
       }
 

@@ -39,7 +39,7 @@ export const AI_MODELS: ModelInfo[] = [
     id: 'realesr-animevideov3',
     name: 'AI · 动漫增强',
     file: '/models/realesr-animevideov3.onnx',
-    rev: 2,
+    rev: 3,
     scale: 4,
     sizeMB: 2.4,
     scene: 'anime',

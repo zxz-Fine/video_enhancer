@@ -51,6 +51,7 @@ export class AiEngine {
   private tile = 768;
   private halfLogged = false;
   private tileLogged = false;
+  private splitLogged = false;
   private _ep: 'webgpu' | 'wasm' = 'wasm';
 
   private constructor(session: ort.InferenceSession, model: ModelInfo, ep: 'webgpu' | 'wasm') {
@@ -65,7 +66,11 @@ export class AiEngine {
     return this._ep;
   }
 
-  static async load(modelId: string, onProgress: AiProgress): Promise<AiEngine> {
+  static async load(
+    modelId: string,
+    onProgress: AiProgress,
+    opts?: { forceWasm?: boolean },
+  ): Promise<AiEngine> {
     const model = getModel(modelId);
     const t0 = performance.now();
     // 线程数必须在会话创建前设定，创建后再改对已建会话无效
@@ -118,7 +123,9 @@ export class AiEngine {
     let session: ort.InferenceSession | null = null;
     let ep: 'webgpu' | 'wasm' = 'wasm';
     let webgpuErr = '';
-    if (navigator.gpu) {
+    if (opts?.forceWasm) {
+      log('ai', '测试模式：强制 wasm 推理，跳过 WebGPU');
+    } else if (navigator.gpu) {
       try {
         const ad = await navigator.gpu.requestAdapter();
         if (!ad) throw new Error('requestAdapter 返回空');
@@ -137,21 +144,21 @@ export class AiEngine {
             session = await create(await fetchModel(cand.file), ['webgpu']);
             ep = 'webgpu';
             log('gpu', `WebGPU 会话创建成功（${cand.label}）`);
-            const ok = await AiEngine.warmupCheck(
+            const chk = await AiEngine.warmupCheck(
               session,
               session.inputNames[0],
               session.outputNames[0],
               model.inputRange,
             );
-            if (!ok) {
+            if (!chk.ok) {
               const last = cand.label === 'fp32' ? '回退 CPU 推理' : '尝试 fp32 WebGPU';
-              log('warn', `WebGPU ${cand.label} warmup 自检未通过 → ${last}`);
+              log('warn', `WebGPU ${cand.label} warmup 自检未通过（${chk.detail}）→ ${last}`);
               await session.release();
               session = null;
               ep = 'wasm';
               continue;
             }
-            log('gpu', 'warmup 自检通过，GPU 推理可用');
+            log('gpu', `warmup 自检通过，GPU 推理可用（${chk.detail}）`);
             break;
           } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
@@ -164,7 +171,7 @@ export class AiEngine {
         webgpuErr = e instanceof Error ? e.message : String(e);
         log('warn', `WebGPU EP 初始化失败: ${webgpuErr.slice(0, 180)}`);
       }
-    } else {
+    } else if (!opts?.forceWasm) {
       webgpuErr = '浏览器无 WebGPU';
       log('warn', '浏览器无 WebGPU，将使用 CPU 推理');
     }
@@ -190,7 +197,7 @@ export class AiEngine {
     inputName: string,
     outputName: string,
     inputRange: number,
-  ): Promise<boolean> {
+  ): Promise<{ ok: boolean; detail: string }> {
     const S = 48;
     const px = S * S;
     const grey = (0.5 * inputRange) as number;
@@ -225,10 +232,10 @@ export class AiEngine {
           }
         }
       }
-      if (!ok) log('warn', `warmup 采样异常: ${failed}`);
-      return ok;
-    } catch {
-      return false;
+      // detail 带输出 dims 与首个异常采样点：fp16 在部分驱动上全零/NaN 就靠这行定位
+      return { ok, detail: `out=${dims.join('x')}${ok ? '' : `, ${failed}`}` };
+    } catch (e) {
+      return { ok: false, detail: `run 抛错: ${e instanceof Error ? e.message.slice(0, 120) : String(e).slice(0, 120)}` };
     }
   }
 
@@ -272,7 +279,10 @@ export class AiEngine {
     const targetH = runOpts?.keepResolution ? src.height : upH;
 
     if (!useTile) {
+      let t = performance.now();
       const out = await this.inferTensor(img.data, w, h);
+      const tRun = performance.now() - t;
+      t = performance.now();
       const rgba = await this.chwToRgba(out.data, out.w, out.h);
       const outCanvas = new OffscreenCanvas(targetW, targetH);
       const octx = outCanvas.getContext('2d')!;
@@ -284,6 +294,10 @@ export class AiEngine {
         octx.imageSmoothingEnabled = true;
         octx.drawImage(tmp, 0, 0, targetW, targetH);
       }
+      if (!this.splitLogged) {
+        this.splitLogged = true;
+        log('ai', `首帧耗时拆分: 会话推理 ${Math.round(tRun)}ms + JS 拼装 ${Math.round(performance.now() - t)}ms`);
+      }
       return outCanvas;
     }
 
@@ -292,6 +306,9 @@ export class AiEngine {
 
     const ov = 16;
     const tileScale = this.model.scale;
+    let tRun = 0;
+    let tBlend = 0;
+    let nTiles = 0;
     for (let y = 0; y < h; y += this.tile - ov * 2) {
       for (let x = 0; x < w; x += this.tile - ov * 2) {
         const sx = Math.max(0, x - ov);
@@ -307,8 +324,12 @@ export class AiEngine {
           const srcRow = ((sy + row) * w + sx) * 4;
           patch.set(img.data.subarray(srcRow, srcRow + tw * 4), row * tw * 4);
         }
+        let t = performance.now();
         const outTile = await this.inferTensor(patch, tw, th);
+        tRun += performance.now() - t;
+        nTiles++;
 
+        t = performance.now();
         const tileRgba = await this.chwToRgba(outTile.data, outTile.w, outTile.h);
         await blitBlend(
           tileRgba,
@@ -329,8 +350,10 @@ export class AiEngine {
           (sy + th) * tileScale,
           ov * tileScale,
         );
+        tBlend += performance.now() - t;
       }
     }
+    let tAsm = performance.now();
     const assembled = new OffscreenCanvas(upW, upH);
     const finalRgba = new Uint8ClampedArray(upW * upH * 4);
     const totalPx = upW * upH;
@@ -357,6 +380,11 @@ export class AiEngine {
       if (zeros > 0) console.log('[dbg] wsum==0 count:', zeros, 'first:', firstZero, 'target:', upW, upH);
     }
     assembled.getContext('2d')!.putImageData(new ImageData(finalRgba, upW, upH), 0, 0);
+    tBlend += performance.now() - tAsm;
+    if (!this.splitLogged) {
+      this.splitLogged = true;
+      log('ai', `首帧耗时拆分: 会话推理 ${Math.round(tRun)}ms + JS 拼装 ${Math.round(tBlend)}ms (${nTiles} 块 ${w}x${h}→${upW}x${upH})`);
+    }
     if (upW === targetW && upH === targetH) {
       return assembled;
     }
