@@ -2,6 +2,8 @@ export interface ModelInfo {
   id: string;
   name: string;
   file: string;
+  /** 权重修订号：换权重/重导 fp16 时 +1，拼进缓存键，强制失效浏览器旧缓存 */
+  rev: number;
   scale: 2 | 4;
   sizeMB: number;
   scene: 'general' | 'anime';
@@ -15,6 +17,7 @@ export const AI_MODELS: ModelInfo[] = [
     id: 'imdn-x2',
     name: 'AI · 极速增强',
     file: '/models/imdn-x2.onnx',
+    rev: 1,
     scale: 2,
     sizeMB: 0.4,
     scene: 'general',
@@ -25,6 +28,7 @@ export const AI_MODELS: ModelInfo[] = [
     id: 'realesr-general-x4v3',
     name: 'AI · 通用 4x',
     file: '/models/realesr-general-x4v3.onnx',
+    rev: 1,
     scale: 4,
     sizeMB: 4.9,
     scene: 'general',
@@ -35,6 +39,7 @@ export const AI_MODELS: ModelInfo[] = [
     id: 'realesr-animevideov3',
     name: 'AI · 动漫增强',
     file: '/models/realesr-animevideov3.onnx',
+    rev: 2,
     scale: 4,
     sizeMB: 2.4,
     scene: 'anime',

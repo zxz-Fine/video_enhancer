@@ -1,5 +1,5 @@
 import * as ort from 'onnxruntime-web';
-import { getModel, type ModelInfo } from './models';
+import { AI_MODELS, getModel, type ModelInfo } from './models';
 import { log } from './logger';
 import ortMjs from './ort-assets/ort-wasm-simd-threaded.jsep.mjs?url';
 import ortWasm from './ort-assets/ort-wasm-simd-threaded.jsep.wasm?url';
@@ -8,6 +8,33 @@ ort.env.wasm.numThreads = 1;
 ort.env.wasm.wasmPaths = { mjs: ortMjs, wasm: ortWasm };
 
 export type AiProgress = (stage: 'fetch' | 'compile' | 'ready', loaded?: number, total?: number) => void;
+
+/** 删除过期模型缓存：键不在当前版本集合里的 /models/* 一律清掉（含已下线模型的 27MB 旧权重） */
+async function purgeStaleModelCaches(cache: Cache): Promise<void> {
+  try {
+    const keep = new Set<string>();
+    for (const m of AI_MODELS) {
+      for (const f of [m.file, `${m.file}.fp16`]) {
+        // rev>1 的模型只认带参键，不带参旧键视为过期删掉
+        keep.add(m.rev > 1 ? `${f}?r=${m.rev}` : f);
+      }
+    }
+    keep.add('/models/rife422-lite.onnx');
+    let dropped = 0;
+    for (const req of await cache.keys()) {
+      const u = new URL(req.url);
+      if (!u.pathname.startsWith('/models/')) continue;
+      const key = u.pathname + u.search;
+      if (!keep.has(key) && !keep.has(u.pathname)) {
+        await cache.delete(req);
+        dropped++;
+      }
+    }
+    if (dropped > 0) log('ai', `已清理过期模型缓存 ${dropped} 项`);
+  } catch {
+    /* 清理失败不影响主流程 */
+  }
+}
 
 export interface AiRunOptions {
   /** 半分辨率推理：源先缩小，输出再回到目标尺寸，计算量约降 4 倍 */
@@ -51,29 +78,32 @@ export class AiEngine {
     onProgress('fetch', 0, 1);
 
     const fetchModel = async (file: string): Promise<Uint8Array> => {
+      // 缓存键带 rev：权重更新后旧缓存自动失效（硬刷新清不掉 CacheStorage，必须靠键变更）
+      const url = model.rev > 1 ? `${file}?r=${model.rev}` : file;
       const t = performance.now();
       try {
         const cache = await caches.open('ai-models');
-        let resp = await cache.match(file);
+        await purgeStaleModelCaches(cache);
+        let resp = await cache.match(url);
         if (!resp) {
-          log('ai', `模型未命中缓存，开始下载: ${file}`);
-          const fetched = await fetch(file);
+          log('ai', `模型未命中缓存，开始下载: ${url}`);
+          const fetched = await fetch(url);
           if (!fetched.ok) throw new Error(`模型下载失败 HTTP ${fetched.status}`);
-          await cache.put(file, fetched.clone());
-          resp = await cache.match(file);
+          await cache.put(url, fetched.clone());
+          resp = await cache.match(url);
         } else {
-          log('ai', `模型命中本地缓存: ${file}`);
+          log('ai', `模型命中本地缓存: ${url}`);
         }
         const data = new Uint8Array(await (resp as Response).arrayBuffer());
-        log('ai', `模型就绪: ${file} (${(data.byteLength / 1048576).toFixed(1)}MB, ${Math.round(performance.now() - t)}ms)`);
+        log('ai', `模型就绪: ${url} (${(data.byteLength / 1048576).toFixed(1)}MB, ${Math.round(performance.now() - t)}ms)`);
         return data;
       } catch (e) {
         if (e instanceof Error && e.message.startsWith('模型下载失败')) throw e;
-        log('warn', `CacheStorage 不可用，直连下载: ${file}`);
-        const resp = await fetch(file);
+        log('warn', `CacheStorage 不可用，直连下载: ${url}`);
+        const resp = await fetch(url);
         if (!resp.ok) throw new Error(`模型下载失败 HTTP ${resp.status}`);
         const data = new Uint8Array(await resp.arrayBuffer());
-        log('ai', `模型就绪: ${file} (${(data.byteLength / 1048576).toFixed(1)}MB, ${Math.round(performance.now() - t)}ms)`);
+        log('ai', `模型就绪: ${url} (${(data.byteLength / 1048576).toFixed(1)}MB, ${Math.round(performance.now() - t)}ms)`);
         return data;
       }
     };
