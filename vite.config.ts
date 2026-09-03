@@ -29,9 +29,20 @@ function ortAssets(): Plugin {
   };
 }
 
+// 跨线程隔离：SharedArrayBuffer 可用后 ORT wasm 走多线程，CPU 回退路径快约 4 倍
+const coiHeaders = {
+  'Cross-Origin-Opener-Policy': 'same-origin',
+  'Cross-Origin-Embedder-Policy': 'credentialless',
+};
+
 export default defineConfig({
   plugins: [basicSsl(), ortAssets()],
   server: {
     host: true,
+    headers: coiHeaders,
+  },
+  preview: {
+    host: true,
+    headers: coiHeaders,
   },
 });

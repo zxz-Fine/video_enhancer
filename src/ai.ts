@@ -124,11 +124,42 @@ export class AiEngine {
         if (!ad) throw new Error('requestAdapter 返回空');
         const hasF16 = ad.features.has('shader-f16');
         log('gpu', `AI 引擎探测: ${ad.info?.description || ad.info?.vendor || '适配器'}, shader-f16=${hasF16}`);
-        const gpuFile = hasF16 ? model.file + '.fp16' : model.file;
-        log('ai', `尝试 WebGPU 推理（${hasF16 ? 'fp16' : 'fp32'} 模型）…`);
-        session = await create(await fetchModel(gpuFile), ['webgpu']);
-        ep = 'webgpu';
-        log('gpu', `WebGPU 会话创建成功（${hasF16 ? 'fp16 加速' : 'fp32'}）`);
+        // 部分 Intel 驱动 fp16 会话能创建但输出全零：fp16 失败后必须先试 fp32 WebGPU，最后才回 CPU
+        const candidates: { file: string; label: string }[] = hasF16
+          ? [
+              { file: model.file + '.fp16', label: 'fp16' },
+              { file: model.file, label: 'fp32' },
+            ]
+          : [{ file: model.file, label: 'fp32' }];
+        for (const cand of candidates) {
+          try {
+            log('ai', `尝试 WebGPU 推理（${cand.label} 模型）…`);
+            session = await create(await fetchModel(cand.file), ['webgpu']);
+            ep = 'webgpu';
+            log('gpu', `WebGPU 会话创建成功（${cand.label}）`);
+            const ok = await AiEngine.warmupCheck(
+              session,
+              session.inputNames[0],
+              session.outputNames[0],
+              model.inputRange,
+            );
+            if (!ok) {
+              const last = cand.label === 'fp32' ? '回退 CPU 推理' : '尝试 fp32 WebGPU';
+              log('warn', `WebGPU ${cand.label} warmup 自检未通过 → ${last}`);
+              await session.release();
+              session = null;
+              ep = 'wasm';
+              continue;
+            }
+            log('gpu', 'warmup 自检通过，GPU 推理可用');
+            break;
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            log('warn', `WebGPU ${cand.label} 初始化失败: ${msg.slice(0, 180)}`);
+            session = null;
+            ep = 'wasm';
+          }
+        }
       } catch (e) {
         webgpuErr = e instanceof Error ? e.message : String(e);
         log('warn', `WebGPU EP 初始化失败: ${webgpuErr.slice(0, 180)}`);
@@ -136,21 +167,6 @@ export class AiEngine {
     } else {
       webgpuErr = '浏览器无 WebGPU';
       log('warn', '浏览器无 WebGPU，将使用 CPU 推理');
-    }
-    if (session && ep === 'webgpu') {
-      const ok = await AiEngine.warmupCheck(
-        session,
-        session.inputNames[0],
-        session.outputNames[0],
-        model.inputRange,
-      );
-      if (!ok) {
-        log('warn', 'WebGPU warmup 自检输出全零 → 回退 CPU 推理');
-        await session.release();
-        session = null;
-      } else {
-        log('gpu', 'warmup 自检通过，GPU 推理可用');
-      }
     }
     if (!session) {
       log('ai', `加载 fp32 模型（CPU 推理）…`);
@@ -187,6 +203,7 @@ export class AiEngine {
       const oh = dims[2];
       const stride = ow * oh;
       let ok = true;
+      let failed = '';
       const samples = [8, 24, 40];
       for (const sy of samples) {
         for (const sx of samples) {
@@ -197,15 +214,18 @@ export class AiEngine {
           // NaN 参与任何比较都为 false，会静默通过下面的阈值检查，必须显式排除
           if (!Number.isFinite(r) || !Number.isFinite(g) || !Number.isFinite(b)) {
             ok = false;
+            if (!failed) failed = `(${sx},${sy}) rgb=${r},${g},${b} 含非有限值`;
             continue;
           }
           const mean = (r + g + b) / 3;
           const spread = Math.max(Math.abs(r - mean), Math.abs(g - mean), Math.abs(b - mean));
           if (spread > inputRange * 0.08 || Math.abs(mean - grey) > inputRange * 0.2) {
             ok = false;
+            if (!failed) failed = `(${sx},${sy}) rgb=${r.toFixed(3)},${g.toFixed(3)},${b.toFixed(3)} (期望≈${grey})`;
           }
         }
       }
+      if (!ok) log('warn', `warmup 采样异常: ${failed}`);
       return ok;
     } catch {
       return false;
