@@ -7,13 +7,19 @@ const modelFile = process.argv[2] ?? '/models/imdn-x2.onnx';
 const epArg = process.argv[3] ?? 'wasm';
 const server = await createServer({ configFile: false, root: process.cwd(), server: { port: 5199, strictPort: true } });
 await server.listen();
-const browser = await chromium.launch({ executablePath: exe, headless: true, args: ['--no-sandbox'] });
+const browser = await chromium.launch({
+  executablePath: exe,
+  headless: true,
+  args: ['--no-sandbox', '--enable-unsafe-webgpu', '--enable-features=Vulkan', '--use-angle=swiftshader', '--use-gl=angle'],
+});
 const page = await browser.newPage();
 await page.goto('http://localhost:5199/');
 await page.waitForTimeout(800);
 const r = await page.evaluate(
   async ({ modelFile, epArg }) => {
-    const ort = await import('/node_modules/onnxruntime-web/dist/ort.wasm.bundle.min.mjs');
+    const ort = epArg === 'webgpu'
+      ? await import('/node_modules/onnxruntime-web/dist/ort.webgpu.bundle.min.mjs').catch(() => import('/node_modules/onnxruntime-web/dist/ort.all.bundle.min.mjs'))
+      : await import('/node_modules/onnxruntime-web/dist/ort.wasm.bundle.min.mjs');
     const resp = await fetch(modelFile);
     const buf = new Uint8Array(await resp.arrayBuffer());
     const session = await ort.InferenceSession.create(buf, { executionProviders: [epArg] });

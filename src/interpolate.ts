@@ -149,8 +149,9 @@ export class FrameInterpolator {
     const ppx = pw * ph;
     const f0 = new Float32Array(3 * ppx);
     const f1 = new Float32Array(3 * ppx);
-    // 边缘复制填充
+    // 边缘复制填充（大图时百万级同步循环，每 128 行让出，避免页面无响应）
     for (let y = 0; y < ph; y++) {
+      if ((y & 127) === 0) await new Promise((r) => setTimeout(r, 0));
       const sy = Math.min(y, h - 1);
       for (let x = 0; x < pw; x++) {
         const sx = Math.min(x, w - 1);
@@ -192,6 +193,7 @@ export class FrameInterpolator {
     const rgba = new Uint8ClampedArray(w * h * 4);
     // 裁掉 padding，回到 w×h
     for (let y = 0; y < h; y++) {
+      if ((y & 127) === 0) await new Promise((r) => setTimeout(r, 0));
       for (let x = 0; x < w; x++) {
         const si = y * ow + x;
         const di = (y * w + x) * 4;

@@ -223,7 +223,7 @@ export class AiEngine {
 
     if (!useTile) {
       const out = await this.inferTensor(img.data, w, h);
-      const rgba = this.chwToRgba(out.data, out.w, out.h);
+      const rgba = await this.chwToRgba(out.data, out.w, out.h);
       const outCanvas = new OffscreenCanvas(targetW, targetH);
       const octx = outCanvas.getContext('2d')!;
       if (out.w === targetW && out.h === targetH) {
@@ -259,8 +259,8 @@ export class AiEngine {
         }
         const outTile = await this.inferTensor(patch, tw, th);
 
-        const tileRgba = this.chwToRgba(outTile.data, outTile.w, outTile.h);
-        blitBlend(
+        const tileRgba = await this.chwToRgba(outTile.data, outTile.w, outTile.h);
+        await blitBlend(
           tileRgba,
           outTile.w,
           outTile.h,
@@ -283,7 +283,10 @@ export class AiEngine {
     }
     const assembled = new OffscreenCanvas(upW, upH);
     const finalRgba = new Uint8ClampedArray(upW * upH * 4);
-    for (let i = 0; i < upW * upH; i++) {
+    const totalPx = upW * upH;
+    for (let i = 0; i < totalPx; i++) {
+      // 每 1M 像素让出一次：9M 级归一化循环同样是秒级同步块
+      if ((i & 0xfffff) === 0) await yieldToUI();
       const w = wsum[i];
       finalRgba[i * 4] = w > 0 ? sum[i * 3] / w : 0;
       finalRgba[i * 4 + 1] = w > 0 ? sum[i * 3 + 1] / w : 0;
@@ -334,11 +337,13 @@ export class AiEngine {
     return { data: t.data as Float32Array, w: t.dims[3], h: t.dims[2] };
   }
 
-  private chwToRgba(data: Float32Array, w: number, h: number): Uint8ClampedArray<ArrayBuffer> {
+  private async chwToRgba(data: Float32Array, w: number, h: number): Promise<Uint8ClampedArray<ArrayBuffer>> {
     const range = this.model.inputRange;
     const px = w * h;
     const rgba = new Uint8ClampedArray(px * 4);
+    // 逐像素 JS 循环：4x 大图时单次同步执行可达秒级，每 1M 像素让出一次，避免主线程被判无响应
     for (let i = 0; i < px; i++) {
+      if ((i & 0xfffff) === 0) await yieldToUI();
       rgba[i * 4] = toByte(data[i], range);
       rgba[i * 4 + 1] = toByte(data[px + i], range);
       rgba[i * 4 + 2] = toByte(data[px * 2 + i], range);
@@ -360,7 +365,12 @@ function toByte(v: number, range: number): number {
   return (v / range) * 255;
 }
 
-function blitBlend(
+/** 让出主线程一个宏任务：CPU 回退时长循环是纯 JS 计算，不让出会被浏览器判“页面无响应” */
+function yieldToUI(): Promise<void> {
+  return new Promise((r) => setTimeout(r, 0));
+}
+
+async function blitBlend(
   src: Uint8ClampedArray,
   sw: number,
   sh: number,
@@ -378,11 +388,13 @@ function blitBlend(
   tileT: number,
   tileB: number,
   feather: number,
-): void {
+): Promise<void> {
   const xRatio = sw / rw;
   const yRatio = sh / rh;
   const effF = feather > 0 ? feather : 1;
   for (let y = 0; y < rh; y++) {
+    // 每 128 行让出一次：9M 像素级全图混合是秒级同步块，不分片即卡死
+    if ((y & 127) === 0) await yieldToUI();
     const py = dy + y;
     const fy = ry + (y + 0.5) * yRatio - 0.5;
     let y0 = Math.floor(fy);
