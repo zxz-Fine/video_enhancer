@@ -220,6 +220,33 @@ if (aiResult.w !== 640 || aiResult.frames !== 8 || aiResult.size < 10000) {
   process.exitCode = 1;
 }
 
+// AI engine path (animevideov3 4x, short video)
+const animeResult = await page.evaluate(
+  async ({ b64 }) => {
+    const { enhanceVideo } = await import('/src/enhance.ts');
+    const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+    const file = new File([bytes], 'anime.mp4', { type: 'video/mp4' });
+    const res = await enhanceVideo(
+      { file, scale: 1, sharpness: 0.6, engine: 'realesr-animevideov3', allowBlackFrames: true },
+      () => {},
+      () => false,
+    );
+    const buf = new Uint8Array(await res.blob.arrayBuffer());
+    const mb = await import('/node_modules/mediabunny/dist/modules/src/index.js');
+    const input = new mb.Input({
+      formats: mb.ALL_FORMATS,
+      source: new mb.BlobSource(new Blob([buf])),
+    });
+    const vt = await input.getPrimaryVideoTrack();
+    return { w: res.width, h: res.height, frames: res.processedFrames, size: buf.length, tw: vt.codedWidth, th: vt.codedHeight };
+  },
+  { b64: shortB64 },
+);
+console.log('AI animevideov3 4x:', animeResult);
+if (animeResult.w !== 1280 || animeResult.h !== 960 || animeResult.frames !== 8 || animeResult.size < 10000) {
+  console.log('AI ANIMEV3 TEST FAIL');
+  process.exitCode = 1;
+}
 // AI keepResolution + 大于 768px 的源（走分块路径）：输出必须与源对齐而非撕裂回绕
 const keepResResult = await page.evaluate(
   async () => {

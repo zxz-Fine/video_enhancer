@@ -32,14 +32,14 @@ export const AI_MODELS: ModelInfo[] = [
     note: '真人/实拍/通用 · 4x · 带轻度降噪，低清实拍首选',
   },
   {
-    id: 'realesrgan-anime6b-x4',
+    id: 'realesr-animevideov3',
     name: 'AI · 动漫增强',
-    file: '/models/realesrgan-anime6b-x4.onnx',
+    file: '/models/realesr-animevideov3.onnx',
     scale: 4,
-    sizeMB: 17.5,
+    sizeMB: 2.4,
     scene: 'anime',
     inputRange: 1,
-    note: '动漫/手绘/插画 · 4x · 细节重建最强，去压缩伪影',
+    note: '动漫/手绘/插画视频专用 · 4x · XS 轻量，时域稳定，替代旧 anime6b 图片模型',
   },
 ];
 

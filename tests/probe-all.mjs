@@ -12,7 +12,7 @@ const r = await page.evaluate(async () => {
   const models = [
     ['/models/imdn-x2.onnx', 64],
     ['/models/realesr-general-x4v3.onnx', 32],
-    ['/models/realesrgan-anime6b-x4.onnx', 32],
+    ['/models/realesr-animevideov3.onnx', 32],
   ];
   const results = {};
   for (const [file, S] of models) {

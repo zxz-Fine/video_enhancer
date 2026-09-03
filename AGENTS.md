@@ -17,7 +17,7 @@
 |---|---|---|
 | imdn-x2 | 0-255 | 2x |
 | realesr-general-x4v3 | 0-1 | 4x |
-| realesrgan-anime6b-x4 | 0-1 | 4x |
+| realesr-animevideov3 | 0-1 | 4x |
 
 - 模型对奇数尺寸输入会 +2 padding，输出必须按张量真实 dims 处理后再缩放
 
