@@ -1,5 +1,5 @@
 import { enhanceVideo, probeVideo, type EnhanceResult, type ScaleFactor } from './enhance';
-import { onLog, getLogs, type LogEntry } from './logger';
+import { onLog, getLogs, log, type LogEntry } from './logger';
 import { asciiConvert, getAsciiCharset, type AsciiJobOptions, type AsciiOptions } from './ascii';
 
 const $ = <T extends HTMLElement>(sel: string): T => {
@@ -84,6 +84,7 @@ let selectedFile: File | null = null;
 let cancelFlag = false;
 let running = false;
 let resultUrl: string | null = null;
+let originalUrl: string | null = null;
 
 function setError(msg: string | null): void {
   errorBox.textContent = msg ?? '';
@@ -100,6 +101,7 @@ function setFile(file: File | null): void {
   }
   stopAsciiPreviewPlayback();
   if (file) {
+    log('info', `已选文件: ${file.name} (${(file.size / 1048576).toFixed(1)}MB, ${file.type || '未知类型'})`);
     asciiPreviewUrl = URL.createObjectURL(file);
     asciiPreviewVideo.src = asciiPreviewUrl;
     asciiPreviewSeek.value = '0';
@@ -118,8 +120,14 @@ function setFile(file: File | null): void {
           `${file.name} · ${info.width}×${info.height} · ${(file.size / 1048576).toFixed(1)} MB · 编码 ${codecName}` +
           (info.codecString ? ` (${info.codecString})` : '') +
           (info.decodable ? '' : ' · ⚠️ 浏览器报告不支持，仍将尝试解码');
+        log(
+          info.decodable ? 'info' : 'warn',
+          `探针: ${info.width}x${info.height}, 编码 ${codecName}${info.codecString ? ` (${info.codecString})` : ''}, 可解码=${info.decodable}`,
+        );
       })
-      .catch(() => {});
+      .catch((e) => {
+        log('warn', `探针失败（仍可尝试处理）: ${e instanceof Error ? e.message : String(e)}`);
+      });
     controls.style.display = 'block';
     startBtn.disabled = false;
   } else {
@@ -308,6 +316,7 @@ cancelBtn.addEventListener('click', () => {
   cancelFlag = true;
   cancelBtn.disabled = true;
   statusText.textContent = '正在取消…';
+  log('warn', '用户点击取消，等待当前帧收尾后中止');
 });
 
 startBtn.addEventListener('click', async () => {
@@ -357,6 +366,16 @@ startBtn.addEventListener('click', async () => {
     URL.revokeObjectURL(resultUrl);
     resultUrl = null;
   }
+  if (originalUrl) {
+    URL.revokeObjectURL(originalUrl);
+    originalUrl = null;
+  }
+
+  log(
+    'info',
+    `任务参数: 模式=${mode}, 引擎=${engine}, 缩放=${engine !== 'fsr' ? `(AI 自带${aiKeepResolution ? ' + 保持原分辨率' : ''}${aiHalfInput ? ' + 半分辨率推理' : ''})` : `${scale}x`}` +
+      `, 锐度=${Math.round(sharpness * 100)}%, 插帧=${interpolation}, 硬件编码=${hwEncode ? '开' : '关'}`,
+  );
 
   try {
     const result: EnhanceResult = await enhanceVideo(
@@ -397,7 +416,8 @@ startBtn.addEventListener('click', async () => {
     );
 
     resultUrl = URL.createObjectURL(result.blob);
-    originalVideo.src = URL.createObjectURL(selectedFile);
+    originalUrl = URL.createObjectURL(selectedFile);
+    originalVideo.src = originalUrl;
     enhancedVideo.src = resultUrl;
     downloadLink.href = resultUrl;
     const baseName = selectedFile.name.replace(/\.[^.]+$/, '');
@@ -408,13 +428,19 @@ startBtn.addEventListener('click', async () => {
     resultInfo.textContent =
       `${result.processedFrames} 帧 · 输出 ${result.width}×${result.height} · 耗时 ${secs}s · ` +
       `文件大小 ${(result.blob.size / 1048576).toFixed(1)} MB`;
+    log('info', `任务成功: ${result.processedFrames} 帧 → ${result.width}x${result.height}, 耗时 ${secs}s, 输出 ${(result.blob.size / 1048576).toFixed(1)}MB`);
     progressWrap.style.display = 'none';
     resultSection.style.display = 'block';
     resetLoupe();
   } catch (err) {
     progressWrap.style.display = 'none';
     const msg = err instanceof Error ? err.message : String(err);
-    if (msg !== '已取消。') setError(msg);
+    if (msg !== '已取消。') {
+      log('error', `任务失败: ${msg}`);
+      setError(msg);
+    } else {
+      log('warn', '任务已取消');
+    }
   } finally {
     running = false;
     startBtn.disabled = !selectedFile;
@@ -446,6 +472,8 @@ for (const r of document.querySelectorAll<HTMLInputElement>('input[name="loupe-z
 let loupePlaying = false;
 
 function syncLoupePlayback(): void {
+  // 暂停时不做 seek：每帧 rAF 都 seek 会让暂停帧抖动、浪费解码
+  if (originalVideo.paused) return;
   if (Math.abs(enhancedVideo.currentTime - originalVideo.currentTime) > 0.04) {
     enhancedVideo.currentTime = originalVideo.currentTime;
   }
@@ -468,10 +496,16 @@ loupePlayBtn.addEventListener('click', async () => {
 originalVideo.addEventListener('play', () => {
   loupePlaying = true;
   loupePlayBtn.textContent = '⏸ 暂停';
+  // 原生控件只会播自己，把增强侧也带上，避免双窗不同步
+  if (enhancedVideo.paused) {
+    syncLoupePlayback();
+    enhancedVideo.play().catch(() => {});
+  }
 });
 originalVideo.addEventListener('pause', () => {
   loupePlaying = false;
   loupePlayBtn.textContent = '▶ 同步播放';
+  if (!enhancedVideo.paused) enhancedVideo.pause();
 });
 
 function loupeMoveTo(e: PointerEvent): void {

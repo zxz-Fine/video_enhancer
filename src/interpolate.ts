@@ -8,18 +8,18 @@ ort.env.wasm.wasmPaths = { mjs: ortMjs, wasm: ortWasm };
 
 export class FrameInterpolator {
   private session: ort.InferenceSession | null = null;
-  private inputNames: readonly string[];
+  private activeEp: 'webgpu' | 'wasm' = 'wasm';
   private gridCache = new Map<string, ort.Tensor>();
   private rebuiltOnCpu = false;
   private loggedPad = '';
 
-  private constructor(session: ort.InferenceSession) {
+  private constructor(session: ort.InferenceSession, ep: 'webgpu' | 'wasm') {
     this.session = session;
-    this.inputNames = session.inputNames;
+    this.activeEp = ep;
   }
 
   get ep(): 'webgpu' | 'wasm' {
-    return this.session && this.inputNames ? 'webgpu' : 'wasm';
+    return this.rebuiltOnCpu ? 'wasm' : this.activeEp;
   }
 
   private static async fetchModelData(): Promise<Uint8Array> {
@@ -42,7 +42,10 @@ export class FrameInterpolator {
   }
 
   static async load(): Promise<FrameInterpolator> {
+    const t0 = performance.now();
+    log('ai', 'RIFE 插帧引擎加载开始');
     let session: ort.InferenceSession | null = null;
+    let ep: 'webgpu' | 'wasm' = 'wasm';
     if (navigator.gpu) {
       try {
         session = await ort.InferenceSession.create(await FrameInterpolator.fetchModelData(), {
@@ -54,21 +57,26 @@ export class FrameInterpolator {
           await session.release();
           session = null;
         } else {
-          log('gpu', 'RIFE 插帧: WebGPU 会话创建成功');
+          ep = 'webgpu';
+          log('gpu', `RIFE 插帧: WebGPU 会话创建成功（${Math.round(performance.now() - t0)}ms）`);
         }
       } catch (e) {
         log('warn', `RIFE WebGPU 初始化失败，回退 CPU: ${e instanceof Error ? e.message.slice(0, 120) : e}`);
         session = null;
       }
+    } else {
+      log('warn', 'RIFE 插帧: 浏览器无 WebGPU，直接使用 CPU');
     }
     if (!session) {
+      const t1 = performance.now();
       session = await ort.InferenceSession.create(await FrameInterpolator.fetchModelData(), {
         executionProviders: ['wasm'],
         graphOptimizationLevel: 'all',
       });
-      log('warn', 'RIFE 插帧: 使用 CPU 推理（较慢）');
+      log('warn', `RIFE 插帧: 使用 CPU 推理（较慢，会话创建 ${Math.round(performance.now() - t1)}ms）`);
     }
-    return new FrameInterpolator(session);
+    log('ai', `RIFE 引擎就绪: 后端=${ep}, 总耗时 ${Math.round(performance.now() - t0)}ms`);
+    return new FrameInterpolator(session, ep);
   }
 
   /** 灰色恒等探针：WebGPU EP 对部分张量广播内核不支持，会话能创建但 run 时才失败，必须实跑验证 */
@@ -200,6 +208,8 @@ export class FrameInterpolator {
   }
 
   destroy(): void {
+    log('ai', `RIFE 会话已释放（后端=${this.ep}，缓存网格 ${this.gridCache.size} 个）`);
+    this.gridCache.clear();
     this.session?.release().catch(() => {});
     this.session = null;
   }

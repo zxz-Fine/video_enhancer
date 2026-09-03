@@ -166,6 +166,7 @@ export async function enhanceVideo(
   shouldCancel: () => boolean,
 ): Promise<EnhanceResult> {
   const start = performance.now();
+  log('info', `任务开始: ${options.file.name} (${(options.file.size / 1048576).toFixed(1)}MB, 类型 ${options.file.type || '未知'})`);
   const input = new Input({ formats: ALL_FORMATS, source: new BlobSource(options.file) });
 
   const videoTrack = await input.getPrimaryVideoTrack();
@@ -291,9 +292,16 @@ export async function enhanceVideo(
 
   let audioSource: AudioSampleSource | null = null;
   const audioTrack = await input.getPrimaryAudioTrack();
-  if (audioTrack && (await audioTrack.canDecode())) {
+  if (!audioTrack) {
+    log('info', '音频: 无音频轨，仅处理视频');
+  } else if (!(await audioTrack.canDecode())) {
+    log('warn', '音频: 存在音频轨但浏览器无法解码，已跳过（成片无声）');
+  } else {
     const audioCodec = await getFirstEncodableAudioCodec(['aac', 'opus']);
-    if (audioCodec) {
+    if (!audioCodec) {
+      log('warn', '音频: 无可用音频编码器，已跳过（成片无声）');
+    } else {
+      log('info', `音频: 透传复用，编码 ${audioCodec}`);
       audioSource = new AudioSampleSource({
         codec: audioCodec,
         quality: new Quality('medium'),
@@ -301,6 +309,7 @@ export async function enhanceVideo(
       try {
         output.addAudioTrack(audioSource);
       } catch {
+        log('warn', '音频: 添加音轨失败，已跳过（成片无声）');
         audioSource = null;
       }
     }
@@ -309,33 +318,47 @@ export async function enhanceVideo(
   await output.start();
 
   if (audioSource && audioTrack) {
+    const tAudio = performance.now();
     const aBase = await audioTrack.getFirstTimestamp();
+    let audioSamples = 0;
+    let audioSkipped = 0;
     const audioSink = new AudioSampleSink(audioTrack);
     for await (const sample of audioSink.samples()) {
       if (shouldCancel()) break;
       sample.setTimestamp(sample.timestamp - aBase);
       if (sample.timestamp < 0) {
+        audioSkipped++;
         sample.close();
         continue;
       }
       await audioSource.add(sample);
+      audioSamples++;
       sample.close();
     }
     audioSource.close();
+    log('info', `音频复用完成: ${audioSamples} 采样${audioSkipped ? `（跳过负时间戳 ${audioSkipped} 个）` : ''}，${Math.round(performance.now() - tAudio)}ms`);
   }
 
   if (shouldCancel()) {
+    log('warn', '用户取消（音频复用阶段后）');
     await output.cancel();
     throw new Error('已取消。');
   }
 
   let ai: AiEngine | null = null;
   if (engine) {
+    const tAi = performance.now();
     ai = await AiEngine.load(engine, (modelStage, modelLoaded, modelTotal) => {
       onProgress({ phase: 'model', modelStage, modelLoaded, modelTotal, processed: 0, total: totalFrames });
     });
+    log('info', `AI 引擎加载总耗时 ${((performance.now() - tAi) / 1000).toFixed(1)}s，后端=${ai.ep}`);
   }
-  const enhancer = engine || asciiOn ? null : await FrameEnhancer.create();
+  let enhancer: FrameEnhancer | null = null;
+  if (!engine && !asciiOn) {
+    const tGpu = performance.now();
+    enhancer = await FrameEnhancer.create();
+    log('info', `算法引擎初始化 ${Math.round(performance.now() - tGpu)}ms`);
+  }
   const aiEp = ai?.ep;
   const sink = new VideoSampleSink(videoTrack);
   const dw = videoTrack.displayWidth;
@@ -344,7 +367,13 @@ export async function enhanceVideo(
   const stageCtx = stageCanvas.getContext('2d')!;
 
   const vBase = await videoTrack.getFirstTimestamp();
-  const inter = interpOn ? await FrameInterpolator.load() : null;
+  log('info', `视频时间戳基线: 首帧 ${vBase.toFixed(3)}s（已归一化到 0 起编）`);
+  let inter: FrameInterpolator | null = null;
+  if (interpOn) {
+    const tInter = performance.now();
+    inter = await FrameInterpolator.load();
+    log('info', `插帧引擎加载 ${((performance.now() - tInter) / 1000).toFixed(1)}s，后端=${inter.ep}`);
+  }
   const frameDur = 1 / outFps;
   if (inter) {
     log(
@@ -379,7 +408,10 @@ export async function enhanceVideo(
     });
   };
 
-  // keepRes 缩回源分辨率与 4K 上限对普通/插帧两条路径统一生效
+  // keepRes 缩回源分辨率与 4K 上限对普通/插帧两条路径统一生效；
+  // finalize 可能改变实际出片尺寸，用 finalW/H 记录，返回给调用方的不再是理论 outW/outH
+  let finalW = outW;
+  let finalH = outH;
   const finalizeFrame = (canvas: OffscreenCanvas): OffscreenCanvas => {
     let out = canvas;
     if (ai && keepRes && (out.width !== dw || out.height !== dh)) {
@@ -399,6 +431,8 @@ export async function enhanceVideo(
         log('info', `输出超过 4K，已限制到 ${cw}x${ch}`);
       }
     }
+    finalW = out.width;
+    finalH = out.height;
     return out;
   };
 
@@ -416,6 +450,7 @@ export async function enhanceVideo(
   try {
     for await (const sample of sink.samples()) {
       if (shouldCancel()) {
+        log('warn', `用户取消（视频处理阶段，已处理 ${processed}/${totalFrames} 源帧）`);
         await output.cancel();
         throw new Error('已取消。');
       }
@@ -536,7 +571,7 @@ export async function enhanceVideo(
   const buffer = output.target.buffer;
   if (!buffer) throw new Error('输出缓冲为空。');
 
-  log('info', `输出完成: 处理 ${processed}/${totalFrames} 源帧, 成片 ${emitted || processed} 帧, 视频时长约 ${lastOutEnd.toFixed(1)}s`);
+  log('info', `输出完成: 处理 ${processed}/${totalFrames} 源帧, 成片 ${emitted || processed} 帧, 视频时长约 ${lastOutEnd.toFixed(1)}s, 实际出片尺寸 ${finalW}x${finalH}, 文件 ${(buffer.byteLength / 1048576).toFixed(1)}MB, 总耗时 ${((performance.now() - start) / 1000).toFixed(1)}s`);
   if (processed < totalFrames) {
     log(
       'warn',
@@ -549,8 +584,8 @@ export async function enhanceVideo(
 
   return {
     blob: new Blob([buffer], { type: 'video/mp4' }),
-    width: outW,
-    height: outH,
+    width: finalW,
+    height: finalH,
     processedFrames: processed,
     elapsedMs: performance.now() - start,
   };

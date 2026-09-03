@@ -81,10 +81,15 @@ export class FrameEnhancer {
     const feats = Array.from(adapter.features);
     log('gpu', `GPU 特性: ${feats.join(', ') || '(无)'}`);
     const device = await adapter.requestDevice();
-    return new FrameEnhancer(device);
+    const limits = device.limits;
+    log('gpu', `GPU 上限: 纹理 ${limits.maxTextureDimension2D}², 存储纹理 ${limits.maxStorageTexturesPerShaderStage}/着色器, 缓冲 ${Math.round(limits.maxBufferSize / 1048576)}MB`);
+    const enhancer = new FrameEnhancer(device);
+    log('gpu', 'WebGPU 管线创建完成 (EASU 超分 / RCAS 锐化 / CAS 锐化)');
+    return enhancer;
   }
 
   private lastGpuError: string | null = null;
+  private modeLogged = false;
 
   private getTexture(key: string, width: number, height: number): GPUTexture {
     let tex = this.textures.get(key);
@@ -262,6 +267,15 @@ export class FrameEnhancer {
   async processFrame(source: OffscreenCanvas, options: FrameEnhancerOptions): Promise<OffscreenCanvas> {
     const inW = source.width;
     const inH = source.height;
+    if (!this.modeLogged) {
+      this.modeLogged = true;
+      log(
+        'gpu',
+        options.scale === 1
+          ? `算法增强首帧: ${inW}x${inH} CAS 锐化（锐度 ${Math.round(options.sharpness * 100)}%），后续帧不再重复记录`
+          : `算法增强首帧: ${inW}x${inH} → ${inW * options.scale}x${inH * options.scale} FSR 超分 + RCAS 锐化（锐度 ${Math.round(options.sharpness * 100)}%），后续帧不再重复记录`,
+      );
+    }
 
     const srcKey = `src-${inW}x${inH}`;
     const srcTex = this.getSourceTexture(inW, inH);
@@ -364,6 +378,7 @@ export class FrameEnhancer {
   }
 
   destroy(): void {
+    log('gpu', `WebGPU 资源已释放（纹理 ${this.textures.size} 个，绑定组 ${this.binds.size} 个）`);
     for (const tex of this.textures.values()) tex.destroy();
     this.textures.clear();
     this.binds.clear();

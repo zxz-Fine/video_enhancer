@@ -22,6 +22,8 @@ export class AiEngine {
   private inputName: string;
   private outputName: string;
   private tile = 768;
+  private halfLogged = false;
+  private tileLogged = false;
   private _ep: 'webgpu' | 'wasm' = 'wasm';
 
   private constructor(session: ort.InferenceSession, model: ModelInfo, ep: 'webgpu' | 'wasm') {
@@ -38,24 +40,41 @@ export class AiEngine {
 
   static async load(modelId: string, onProgress: AiProgress): Promise<AiEngine> {
     const model = getModel(modelId);
-    log('ai', `引擎加载: ${model.name} (${model.sizeMB}MB, ${model.scale}x)`);
+    const t0 = performance.now();
+    // 线程数必须在会话创建前设定，创建后再改对已建会话无效
+    const isolated = typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated;
+    ort.env.wasm.numThreads = isolated
+      ? Math.min(4, Math.max(1, (navigator.hardwareConcurrency || 4) - 1))
+      : 1;
+    log('ai', `引擎加载: ${model.name} (${model.sizeMB}MB, ${model.scale}x, 输入范围 0-${model.inputRange})`);
+    log('ai', `运行环境: crossOriginIsolated=${isolated}, 硬件并发=${navigator.hardwareConcurrency ?? '?'}, wasm 线程=${ort.env.wasm.numThreads}`);
     onProgress('fetch', 0, 1);
 
     const fetchModel = async (file: string): Promise<Uint8Array> => {
+      const t = performance.now();
       try {
         const cache = await caches.open('ai-models');
         let resp = await cache.match(file);
         if (!resp) {
+          log('ai', `模型未命中缓存，开始下载: ${file}`);
           const fetched = await fetch(file);
           if (!fetched.ok) throw new Error(`模型下载失败 HTTP ${fetched.status}`);
           await cache.put(file, fetched.clone());
           resp = await cache.match(file);
+        } else {
+          log('ai', `模型命中本地缓存: ${file}`);
         }
-        return new Uint8Array(await (resp as Response).arrayBuffer());
-      } catch {
+        const data = new Uint8Array(await (resp as Response).arrayBuffer());
+        log('ai', `模型就绪: ${file} (${(data.byteLength / 1048576).toFixed(1)}MB, ${Math.round(performance.now() - t)}ms)`);
+        return data;
+      } catch (e) {
+        if (e instanceof Error && e.message.startsWith('模型下载失败')) throw e;
+        log('warn', `CacheStorage 不可用，直连下载: ${file}`);
         const resp = await fetch(file);
         if (!resp.ok) throw new Error(`模型下载失败 HTTP ${resp.status}`);
-        return new Uint8Array(await resp.arrayBuffer());
+        const data = new Uint8Array(await resp.arrayBuffer());
+        log('ai', `模型就绪: ${file} (${(data.byteLength / 1048576).toFixed(1)}MB, ${Math.round(performance.now() - t)}ms)`);
+        return data;
       }
     };
 
@@ -105,18 +124,17 @@ export class AiEngine {
     }
     if (!session) {
       log('ai', `加载 fp32 模型（CPU 推理）…`);
+      const t1 = performance.now();
       session = await create(await fetchModel(model.file), ['wasm']);
       ep = 'wasm';
+      log('ai', `CPU 会话创建耗时 ${Math.round(performance.now() - t1)}ms`);
     }
     if (ep === 'wasm') {
       log('warn', `最终推理后端: CPU (wasm, ${ort.env.wasm.numThreads} 线程)。速度比 GPU 慢 10 倍以上。`);
     } else {
       log('gpu', `最终推理后端: GPU (WebGPU)`);
     }
-    log('ai', '引擎就绪');
-    if (ep === 'wasm' && typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated) {
-      ort.env.wasm.numThreads = Math.min(4, Math.max(1, (navigator.hardwareConcurrency || 4) - 1));
-    }
+    log('ai', `引擎就绪: ${model.id}, 后端=${ep}, 总耗时 ${Math.round(performance.now() - t0)}ms`);
     onProgress('ready');
     return new AiEngine(session, model, ep);
   }
@@ -180,7 +198,11 @@ export class AiEngine {
       const k = 1 / Math.sqrt(this.model.scale);
       work = new OffscreenCanvas(Math.round(src.width * k), Math.round(src.height * k));
       work.getContext('2d')!.drawImage(src, 0, 0, work.width, work.height);
-      log('ai', `性能模式: 推理输入 ${work.width}x${work.height} (源 ${src.width}x${src.height})`);
+      // 逐帧打会刷屏（500 条上限），只记一次
+      if (!this.halfLogged) {
+        this.halfLogged = true;
+        log('ai', `性能模式: 推理输入 ${work.width}x${work.height} (源 ${src.width}x${src.height})，后续帧不再重复记录`);
+      }
     }
     const w = work.width;
     const h = work.height;
@@ -188,6 +210,10 @@ export class AiEngine {
     const img = ctx.getImageData(0, 0, w, h);
 
     const useTile = w > this.tile || h > this.tile;
+    if (useTile && !this.tileLogged) {
+      this.tileLogged = true;
+      log('ai', `分块推理: 输入 ${w}x${h} 超过单块 ${this.tile}px，按 ${this.tile}px 分块（重叠 16px）逐块推理后加权拼接，后续帧不再重复记录`);
+    }
     // 瓦片按模型倍数拼装，keepResolution 最后统一缩回源尺寸
     const scale = this.model.scale;
     const upW = w * scale;
@@ -322,6 +348,7 @@ export class AiEngine {
   }
 
   destroy(): void {
+    log('ai', `AI 引擎已释放: ${this.model.id} (后端=${this._ep})`);
     this.session?.release().catch(() => {});
     this.session = null;
   }
