@@ -64,12 +64,6 @@
       .subtitle { color: var(--muted); margin: 7px 0 0; font-size: 0.85rem; font-family: var(--font-mono); }
       .flow { margin: 10px 0 0; font-family: var(--font-mono); font-size: 0.76rem; color: var(--muted); }
       .flow span { color: var(--accent); margin: 0 6px; }
-      .pill {
-        display: inline-flex; align-items: center; vertical-align: 3px;
-        font-family: var(--font-mono); font-size: 0.7rem; font-weight: 600;
-        padding: 3px 10px; border-radius: 999px; margin-left: 10px;
-        border: 1px solid var(--accent-border); background: var(--accent-dim); color: var(--accent);
-      }
 
       .card {
         background: var(--panel); border: 1px solid var(--border-soft);
@@ -101,15 +95,6 @@
       }
       .sec-title { font-size: 0.95rem; font-weight: 700; }
       .sec-title.sub { font-size: 0.86rem; font-weight: 650; }
-      .tag {
-        font-family: var(--font-mono); font-size: 0.7rem; font-weight: 600;
-        padding: 2px 9px; border-radius: 999px;
-        border: 1px solid var(--border); color: var(--muted); background: transparent;
-      }
-      .tag.single { border-color: var(--accent-border); color: var(--accent); background: var(--accent-dim); }
-      .tag.optional { border-color: var(--amber-border); color: var(--amber); background: var(--amber-dim); }
-      .tag.default { border-color: var(--accent-border); color: var(--accent); background: var(--accent-dim); }
-      .tag.exclusive { border-color: var(--rose-border); color: var(--rose); background: var(--rose-dim); }
       .sec-hint { font-size: 0.78rem; color: var(--muted); margin: -4px 0 10px 30px; }
       .mt-4 { margin-top: 4px; }
       .mt-8 { margin-top: 8px; }
@@ -133,15 +118,10 @@
         box-shadow: inset 0 0 0 1px var(--accent);
       }
       .pick input:focus-visible + .body { outline: 2px solid var(--accent); outline-offset: 2px; }
+      .pick.locked { opacity: 0.4; }
+      .pick.locked .body { cursor: not-allowed; transform: none; }
       .pick .name { font-size: 0.9rem; font-weight: 650; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
       .pick .desc { display: block; color: var(--muted); font-size: 0.75rem; margin-top: 4px; line-height: 1.5; }
-      .mini {
-        font-family: var(--font-mono); font-size: 0.64rem; font-weight: 700;
-        padding: 1px 6px; border-radius: 4px;
-        border: 1px solid var(--accent-border); background: var(--accent-dim); color: var(--accent);
-      }
-      .mini.hot { border-color: var(--amber-border); background: var(--amber-dim); color: var(--amber); }
-      .mini.save { border-color: var(--border); background: var(--panel-3); color: var(--muted); }
 
       /* 分段单选（短选项） */
       .seg { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -328,8 +308,8 @@
       <header class="hero">
         <div class="logo">增</div>
         <div>
-          <h1>本地视频画质增强器<span class="pill">全程本地，不上传</span></h1>
-          <p class="subtitle">WebGPU 加速 · 锐化 / 超分 / AI 修复 / 插帧 / ASCII / 图片增强</p>
+          <h1>本地视频画质增强器</h1>
+          <p class="subtitle">全程本地，不上传 · WebGPU 加速 · 锐化 / 超分 / AI 修复 / 插帧 / ASCII / 图片增强</p>
           <p class="flow">选文件<span>→</span>选功能<span>→</span>调参数<span>→</span>运行</p>
         </div>
       </header>
@@ -345,13 +325,12 @@
         <div class="sec">
           <div class="sec-head">
             <span class="sec-num">1</span><span class="sec-title">功能</span>
-            <span class="tag single">三选一</span>
           </div>
           <div class="pick-grid cols-3" id="category-group">
             <label class="pick">
               <input type="radio" name="category" value="enhance" checked />
               <span class="body">
-                <span class="name">画质增强 <span class="mini">默认</span></span>
+                <span class="name">画质增强</span>
                 <span class="desc">锐化、超分、AI 修复、插帧，视频用这个</span>
               </span>
             </label>
@@ -365,7 +344,7 @@
             <label class="pick">
               <input type="radio" name="category" value="image" />
               <span class="body">
-                <span class="name">图片增强 <span class="mini hot">新</span></span>
+                <span class="name">图片增强</span>
                 <span class="desc">动漫插画、表情包修复，单图秒出</span>
               </span>
             </label>
@@ -376,35 +355,34 @@
           <div class="sec">
             <div class="sec-head">
               <span class="sec-num">2</span><span class="sec-title">处理引擎</span>
-              <span class="tag single">多选一</span>
             </div>
             <div class="pick-grid cols-3" id="engine-group">
               <label class="pick">
                 <input type="radio" name="engine" value="fsr" checked />
                 <span class="body">
-                  <span class="name">算法增强 <span class="mini">默认 · 免下载</span></span>
-                  <span class="desc">CAS 锐化 / FSR 超分 · 最快，低清源轻度修复</span>
+                  <span class="name">算法增强</span>
+                  <span class="desc">CAS 锐化 / FSR 超分 · 免下载 · 低清源轻度修复</span>
                 </span>
               </label>
               <label class="pick">
                 <input type="radio" name="engine" value="imdn-x2" />
                 <span class="body">
-                  <span class="name">AI · 极速增强 <span class="mini hot">0.4MB</span></span>
-                  <span class="desc">通用 2x，实时级速度，高清源用它</span>
+                  <span class="name">AI · 极速增强</span>
+                  <span class="desc">通用 2x · 0.4MB · 实时级速度，高清源用它</span>
                 </span>
               </label>
               <label class="pick">
                 <input type="radio" name="engine" value="realesr-general-x4v3" />
                 <span class="body">
-                  <span class="name">AI · 通用 4x <span class="mini hot">4.9MB</span></span>
-                  <span class="desc">真人/实拍 · 低清实拍首选，带轻度降噪</span>
+                  <span class="name">AI · 通用 4x</span>
+                  <span class="desc">真人/实拍 · 4.9MB · 低清实拍首选，带轻度降噪</span>
                 </span>
               </label>
               <label class="pick">
                 <input type="radio" name="engine" value="realesr-animevideov3" />
                 <span class="body">
-                  <span class="name">AI · 动漫增强 <span class="mini hot">2.4MB</span></span>
-                  <span class="desc">动漫/手绘视频专用 · 时域稳定不闪烁</span>
+                  <span class="name">AI · 动漫增强</span>
+                  <span class="desc">动漫/手绘视频专用 · 2.4MB · 时域稳定不闪烁</span>
                 </span>
               </label>
               <label class="pick">
@@ -417,7 +395,7 @@
               <label class="pick">
                 <input type="radio" name="engine" value="realcugan-se-2x-denoise3" />
                 <span class="body">
-                  <span class="name">AI · 表情包修复 <span class="mini">去压缩</span></span>
+                  <span class="name">AI · 表情包修复</span>
                   <span class="desc">渣清/重压缩小图 · 强降噪去 JPEG 伪影</span>
                 </span>
               </label>
@@ -435,12 +413,10 @@
           <div class="sec">
             <div class="sec-head">
               <span class="sec-num">3</span><span class="sec-title">画面参数</span>
-              <span class="tag default">默认即用</span>
             </div>
             <p class="sec-hint">缩放与锐化仅算法引擎生效；AI 引擎看第 2 步自带倍数。</p>
             <div class="sec-head mt-4">
               <span class="sec-title sub">缩放</span>
-              <span class="tag single">多选一</span>
             </div>
             <div class="seg" id="scale-group">
               <label><input type="radio" name="scale" value="1" checked /><span>保持原分辨率<small>CAS 锐化修复</small></span></label>
@@ -450,13 +426,10 @@
             <div class="slider-line">
               <span>锐化强度 <b id="sharpness-value">60%</b></span>
               <input id="sharpness" type="range" min="0" max="100" value="60" />
-              <span class="tag default">默认 60</span>
             </div>
             <div id="interp-row">
               <div class="sec-head mt-4">
                 <span class="sec-title sub">插帧（RIFE · 约 19MB 显存）</span>
-                <span class="tag single">多选一</span>
-                <span class="tag optional">可选 · 默认关</span>
               </div>
               <div class="seg" id="interp-group">
                 <label><input type="radio" name="interp" value="none" checked /><span>关闭</span></label>
@@ -469,12 +442,11 @@
           <div class="sec">
             <div class="sec-head">
               <span class="sec-num">4</span><span class="sec-title">加速与 AI 微调</span>
-              <span class="tag optional">可选</span>
             </div>
             <div id="hw-row">
               <label class="switch-row">
                 <input id="hw-encode" type="checkbox" checked />
-                <span>硬件编码加速 <span class="tag default">默认开</span><small>显卡固定功能编码单元，快数倍；同码率画质略降，关了回退软件编码</small></span>
+                <span>硬件编码加速<small>显卡固定功能编码单元，快数倍；同码率画质略降，关了回退软件编码</small></span>
               </label>
             </div>
             <div id="ai-keep-res-row" style="display: none">
@@ -486,14 +458,13 @@
                 <input id="ai-half-input" type="checkbox" />
                 <span>性能模式<small>半分辨率推理，快约 4 倍；与上一项二选一（互斥）</small></span>
               </label>
-              <p class="sec-hint"><span class="tag exclusive">二选一</span> 保持原分辨率与性能模式互斥，勾一个会自动取消另一个。</p>
+              <p class="sec-hint">保持原分辨率与性能模式互斥，勾一个会自动取消另一个。</p>
             </div>
           </div>
 
           <div class="sec">
             <div class="sec-head">
               <span class="sec-title sub">一键预设</span>
-              <span class="tag optional">可选</span>
             </div>
             <div class="preset-row">
               <button type="button" class="preset-btn" data-preset="default">恢复默认</button>
@@ -508,7 +479,6 @@
           <div class="sec">
             <div class="sec-head">
               <span class="sec-num">2</span><span class="sec-title">字符画参数</span>
-              <span class="tag default">默认即用</span>
             </div>
             <div class="slider-line">
               <span>字符列数 <b id="ascii-cols-value">120</b></span>
@@ -519,7 +489,7 @@
                 <button type="button" class="ascii-preset" data-cols="220">高 220</button>
               </span>
             </div>
-            <div class="sec-head"><span class="sec-title sub">字符集</span><span class="tag single">多选一</span></div>
+            <div class="sec-head"><span class="sec-title sub">字符集</span></div>
             <div class="seg" id="ascii-charset-group">
               <label><input type="radio" name="ascii-charset" value="classic" checked /><span>经典</span></label>
               <label><input type="radio" name="ascii-charset" value="standard" /><span>细腻<small>70 级</small></span></label>
@@ -534,7 +504,7 @@
               <input id="ascii-threshold" type="range" min="0" max="60" value="0" />
               <small class="muted">低于该亮度的格子留空，去暗部噪点</small>
             </div>
-            <div class="sec-head"><span class="sec-title sub">样式</span><span class="tag optional">可选</span></div>
+            <div class="sec-head"><span class="sec-title sub">样式</span></div>
             <label class="switch-row">
               <input id="ascii-color" type="checkbox" />
               <span>彩色<small>保留原像素颜色逐格着色</small></span>
@@ -549,7 +519,7 @@
             </div>
           </div>
           <div class="sec">
-            <div class="sec-head"><span class="sec-title sub">实时预览</span><span class="tag default">所见即所得</span></div>
+            <div class="sec-head"><span class="sec-title sub">实时预览</span></div>
             <canvas id="ascii-preview-canvas"></canvas>
             <div class="loupe-head mt-8">
               <button id="ascii-preview-play" type="button">▶ 预览播放</button>
@@ -565,7 +535,6 @@
           <div class="sec">
             <div class="sec-head">
               <span class="sec-num">2</span><span class="sec-title">输出格式</span>
-              <span class="tag single">二选一</span>
             </div>
             <div class="seg" id="image-format-group">
               <label><input type="radio" name="image-format" value="png" checked /><span>PNG<small>无损 · 体积大</small></span></label>

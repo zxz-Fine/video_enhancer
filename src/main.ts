@@ -92,6 +92,35 @@ function setError(msg: string | null): void {
   errorBox.style.display = msg ? 'block' : 'none';
 }
 
+// 文件类型门控：图片只能走图片增强，视频不能走图片增强，不兼容的类别直接锁定
+type FileKind = 'video' | 'image';
+let fileKind: FileKind | null = null;
+
+function isCategoryCompatible(value: string, kind: FileKind): boolean {
+  return kind === 'image' ? value === 'image' : value !== 'image';
+}
+
+function applyFileKind(): void {
+  for (const r of document.querySelectorAll<HTMLInputElement>('input[name="category"]')) {
+    const label = r.closest('label');
+    const ok = !fileKind || isCategoryCompatible(r.value, fileKind);
+    r.disabled = !ok;
+    label?.classList.toggle('locked', !ok);
+    if (!ok && fileKind) {
+      label?.setAttribute('title', fileKind === 'image' ? '已选择图片文件，仅支持图片增强' : '已选择视频文件，不支持图片增强');
+    } else {
+      label?.removeAttribute('title');
+    }
+  }
+  // 动漫预设的价值在时域稳定，对单张图片无意义
+  const animePreset = document.querySelector<HTMLButtonElement>('[data-preset="anime"]');
+  if (animePreset) animePreset.style.display = fileKind === 'image' ? 'none' : '';
+  if (fileKind && !isCategoryCompatible(currentMode(), fileKind)) {
+    const target = fileKind === 'image' ? 'image' : 'enhance';
+    document.querySelector<HTMLInputElement>(`input[name="category"][value="${target}"]`)?.click();
+  }
+}
+
 function setFile(file: File | null): void {
   selectedFile = file;
   setError(null);
@@ -102,6 +131,8 @@ function setFile(file: File | null): void {
   }
   stopAsciiPreviewPlayback();
   if (file) {
+    fileKind = file.type.startsWith('image/') ? 'image' : 'video';
+    applyFileKind();
     const sizeMb = (file.size / 1048576).toFixed(1);
     log('info', `已选文件: ${file.name} (${file.size < 1048576 ? `${(file.size / 1024).toFixed(0)}KB` : `${sizeMb}MB`}, ${file.type || '未知类型'})`);
     if (file.type.startsWith('image/')) {
@@ -147,6 +178,8 @@ function setFile(file: File | null): void {
     controls.style.display = 'block';
     startBtn.disabled = false;
   } else {
+    fileKind = null;
+    applyFileKind();
     $('#file-meta').textContent = '';
     controls.style.display = 'none';
   }
