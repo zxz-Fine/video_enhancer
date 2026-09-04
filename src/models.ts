@@ -9,6 +9,8 @@ export interface ModelInfo {
   scene: 'general' | 'anime';
   /** 模型期望的像素输入范围：255 或 1 */
   inputRange: 255 | 1;
+  /** 单块边长（显存/内存预算）：默认 768；大参数模型调小（如 anime6b 用 384，否则单块 OOM） */
+  tile?: number;
   note: string;
 }
 
@@ -55,6 +57,7 @@ export const AI_MODELS: ModelInfo[] = [
     sizeMB: 17.5,
     scene: 'anime',
     inputRange: 1,
+    tile: 384,
     note: '动漫插画/静图专用 · 4x · 细节重建强（图片模式首选）',
   },
   {

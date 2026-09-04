@@ -52,11 +52,13 @@ export class AiEngine {
   private halfLogged = false;
   private tileLogged = false;
   private splitLogged = false;
+  private capLogged = false;
   private _ep: 'webgpu' | 'wasm' = 'wasm';
 
   private constructor(session: ort.InferenceSession, model: ModelInfo, ep: 'webgpu' | 'wasm') {
     this.session = session;
     this.model = model;
+    this.tile = model.tile ?? 768;
     this._ep = ep;
     this.inputName = session.inputNames[0];
     this.outputName = session.outputNames[0];
@@ -261,8 +263,27 @@ export class AiEngine {
         log('ai', `性能模式: 推理输入 ${work.width}x${work.height} (源 ${src.width}x${src.height})，后续帧不再重复记录`);
       }
     }
-    const w = work.width;
-    const h = work.height;
+    const scale = this.model.scale;
+    let w = work.width;
+    let h = work.height;
+    // 限幅前置：模型输出超 4K 上限时，最终都会被缩回 4K（见 finalize），
+    // 全分辨率推理的中间缓冲（千万像素级 Float32 x3 + RGBA）在低显存机器上直接 OOM 卡死。
+    // 先等比缩输入，使模型输出≈上限：计算量/内存同比例下降，视觉等价（多余像素本就要扔掉）。
+    const CAP_PX = 3840 * 2160;
+    if (w * h * scale * scale > CAP_PX) {
+      const k = Math.sqrt(CAP_PX / (w * h * scale * scale));
+      const cw = Math.max(64, Math.round(w * k));
+      const ch = Math.max(64, Math.round(h * k));
+      const pre = new OffscreenCanvas(cw, ch);
+      pre.getContext('2d')!.drawImage(work, 0, 0, cw, ch);
+      work = pre;
+      w = cw;
+      h = ch;
+      if (!this.capLogged) {
+        this.capLogged = true;
+        log('ai', `限幅前置: 模型输出超 4K，输入先缩到 ${cw}x${ch}（输出≈${cw * scale}x${ch * scale}），后续帧不再重复记录`);
+      }
+    }
     const ctx = work.getContext('2d')!;
     const img = ctx.getImageData(0, 0, w, h);
 
@@ -272,7 +293,6 @@ export class AiEngine {
       log('ai', `分块推理: 输入 ${w}x${h} 超过单块 ${this.tile}px，按 ${this.tile}px 分块（重叠 16px）逐块推理后加权拼接，后续帧不再重复记录`);
     }
     // 瓦片按模型倍数拼装，keepResolution 最后统一缩回源尺寸
-    const scale = this.model.scale;
     const upW = w * scale;
     const upH = h * scale;
     const targetW = runOpts?.keepResolution ? src.width : upW;

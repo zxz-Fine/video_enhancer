@@ -27,6 +27,7 @@
 - 模型对奇数尺寸输入会 +2 padding，输出必须按张量真实 dims 处理后再缩放
 - fp16 变体必须用 `onnxconverter_common.float16.convert_float_to_float16(keep_io_types=True)` 生成（补 Cast 边界）；手改 initializer dtype 会导致 Conv 内外精度混杂，WebGPU EP 建会话失败回退 CPU
 - ONNX 动态轴：输出 H/W 的 dim_param 必须与输入不同名（如 `height_x4`/`width_x4`）；同名会被 WebGPU EP 当等尺寸复用缓冲，run 时 Shape mismatch 抛错（wasm EP 不报错，会漏检）
+- 大参数模型设 `ModelInfo.tile` 调小分块（如 anime6b 384，默认 768），否则单块 OOM；模型输出超 4K 时 `processCanvas` 会限幅前置缩输入（视觉等价，省内存/算量）
 
 ## 用户环境
 
