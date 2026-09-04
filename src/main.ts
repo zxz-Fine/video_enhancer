@@ -135,7 +135,7 @@ function setFile(file: File | null): void {
         $('#file-meta').textContent =
           `${file.name} · ${info.width}×${info.height} · ${(file.size / 1048576).toFixed(1)} MB · 编码 ${codecName}` +
           (info.codecString ? ` (${info.codecString})` : '') +
-          (info.decodable ? '' : ' · ⚠️ 浏览器报告不支持，仍将尝试解码');
+          (info.decodable ? '' : '（注意：浏览器报告不支持，仍将尝试解码）');
         log(
           info.decodable ? 'info' : 'warn',
           `探针: ${info.width}x${info.height}, 编码 ${codecName}${info.codecString ? ` (${info.codecString})` : ''}, 可解码=${info.decodable}`,
@@ -542,9 +542,9 @@ startBtn.addEventListener('click', async () => {
           statusText.textContent = `处理中 ${processed}/${total} 帧 (${pct}%)${speed}`;
           statusText.style.color = aiEp === 'wasm' ? '#ffb4ba' : '';
           if (aiEp === 'wasm') {
-            badge('cpu', '⚠ CPU 软件推理 — 速度慢 10 倍以上，建议排查 GPU', computeBadge);
+            badge('cpu', 'CPU 软件推理：慢 10 倍以上，建议排查 GPU', computeBadge);
           } else {
-            badge('gpu', '✓ GPU 加速中 (WebGPU)', computeBadge);
+            badge('gpu', 'GPU 加速中 (WebGPU)', computeBadge);
           }
           badge('none', mode === 'ascii' ? 'ASCII 转换' : engine === 'fsr' ? '算法增强' : 'AI 引擎', engineBadge);
           progressBar.style.width = `${pct}%`;

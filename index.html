@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>本地视频画质增强器 — WebGPU</title>
+    <title>本地视频画质增强器 - WebGPU</title>
     <style>
       :root {
         --bg: #0c1014;
@@ -36,7 +36,8 @@
       .hero .logo {
         width: 46px; height: 46px; border-radius: 13px; flex: none;
         background: linear-gradient(135deg, #2b6fd4, #7cc4ff);
-        display: flex; align-items: center; justify-content: center; font-size: 1.5rem;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 1.3rem; font-weight: 800; color: #fff;
         box-shadow: 0 6px 24px rgba(79, 156, 249, 0.35);
       }
       .hero h1 { font-size: 1.45rem; margin: 0; letter-spacing: 0.02em; }
@@ -71,7 +72,6 @@
       }
       #drop-zone:hover { border-color: var(--accent); }
       #drop-zone.dragover { border-color: var(--accent); background: #20304a; }
-      #drop-zone .icon { font-size: 2rem; display: block; margin-bottom: 8px; }
       #file-meta { margin: 14px 0 0; color: var(--muted); font-size: 0.88rem; word-break: break-all; }
 
       /* ===== 分区标题 + 规则徽标 ===== */
@@ -245,15 +245,20 @@
         border-radius: 10px; font-weight: 700;
       }
       .dimmed { opacity: 0.4; pointer-events: none; }
+      /* 形状锁：卡片 14 / 选项 10-12 / 胶囊 999；单点缀色 --accent 全页锁定 */
+      @media (prefers-reduced-motion: reduce) {
+        * { transition: none !important; }
+        .pick .body:hover { transform: none; }
+      }
       @media (max-width: 640px) { .compare { grid-template-columns: 1fr; } .steps { display: none; } }
     </style>
   </head>
   <body>
     <div class="container">
       <div class="hero">
-        <div class="logo">🎬</div>
+        <div class="logo">增</div>
         <div>
-          <h1>本地视频画质增强器<span class="pill">🔒 全程本地 · 不上传</span></h1>
+          <h1>本地视频画质增强器<span class="pill">全程本地，不上传</span></h1>
           <p class="subtitle">WebGPU 加速 · 锐化 / 超分 / AI 修复 / 插帧 / ASCII / 图片增强</p>
         </div>
       </div>
@@ -266,7 +271,6 @@
       </div>
 
       <div id="drop-zone">
-        <span class="icon">📥</span>
         点击选择或拖入文件<br />
         <small style="color: var(--muted)">视频：MP4 / MOV / MKV / WEBM · 图片：PNG / JPG / WEBP / GIF（首帧）</small>
       </div>
@@ -283,22 +287,22 @@
             <label class="pick">
               <input type="radio" name="category" value="enhance" checked />
               <span class="body">
-                <span class="name">✨ 画质增强 <span class="mini">默认</span></span>
-                <span class="desc">锐化 · 超分 · AI 修复 · 插帧，视频用这个</span>
+                <span class="name">画质增强 <span class="mini">默认</span></span>
+                <span class="desc">锐化、超分、AI 修复、插帧，视频用这个</span>
               </span>
             </label>
             <label class="pick">
               <input type="radio" name="category" value="ascii" />
               <span class="body">
-                <span class="name">🔤 视频转 ASCII</span>
-                <span class="desc">字符画风格 · 纯算法 · 极快免下载</span>
+                <span class="name">视频转 ASCII</span>
+                <span class="desc">字符画风格，纯算法，极快免下载</span>
               </span>
             </label>
             <label class="pick">
               <input type="radio" name="category" value="image" />
               <span class="body">
-                <span class="name">🖼️ 图片增强 <span class="mini new">新</span></span>
-                <span class="desc">动漫插画 · 表情包修复 · 单图秒出</span>
+                <span class="name">图片增强 <span class="mini new">新</span></span>
+                <span class="desc">动漫插画、表情包修复，单图秒出</span>
               </span>
             </label>
           </div>
@@ -314,7 +318,7 @@
               <label class="pick">
                 <input type="radio" name="engine" value="fsr" checked />
                 <span class="body">
-                  <span class="name">⚡ 算法增强 <span class="mini">默认 · 免下载</span></span>
+                  <span class="name">算法增强 <span class="mini">默认 · 免下载</span></span>
                   <span class="desc">CAS 锐化 / FSR 超分 · 最快，低清源轻度修复</span>
                 </span>
               </label>
@@ -322,7 +326,7 @@
                 <input type="radio" name="engine" value="imdn-x2" />
                 <span class="body">
                   <span class="name">AI · 极速增强 <span class="mini hot">0.4MB</span></span>
-                  <span class="desc">通用 · 2x · 实时级速度，高清源用它</span>
+                  <span class="desc">通用 2x，实时级速度，高清源用它</span>
                 </span>
               </label>
               <label class="pick">
@@ -406,17 +410,17 @@
             <div id="hw-row">
               <label class="switch-row">
                 <input id="hw-encode" type="checkbox" checked />
-                <span>🚀 硬件编码加速 <span class="tag default">默认开</span><small>显卡固定功能编码单元，快数倍 · 同码率画质略降 · 关了回退软件编码</small></span>
+                <span>硬件编码加速 <span class="tag default">默认开</span><small>显卡固定功能编码单元，快数倍；同码率画质略降，关了回退软件编码</small></span>
               </label>
             </div>
             <div id="ai-keep-res-row" style="display: none">
               <label class="switch-row">
                 <input id="ai-keep-res" type="checkbox" />
-                <span>🎯 保持原分辨率<small>AI 只修复不放大 · 编码更快</small></span>
+                <span>保持原分辨率<small>AI 只修复不放大 · 编码更快</small></span>
               </label>
               <label class="switch-row">
                 <input id="ai-half-input" type="checkbox" />
-                <span>⏩ 性能模式<small>半分辨率推理 · 快约 4 倍 · 与上一项二选一（互斥）</small></span>
+                <span>性能模式<small>半分辨率推理，快约 4 倍；与上一项二选一（互斥）</small></span>
               </label>
               <p class="sec-hint"><span class="tag exclusive">二选一</span> 保持原分辨率与性能模式互斥，勾一个会自动取消另一个。</p>
             </div>
@@ -424,14 +428,14 @@
 
           <div class="sec">
             <div class="sec-head">
-              <span class="sec-title" style="font-size: 0.84rem">⚡ 一键预设</span>
+              <span class="sec-title" style="font-size: 0.84rem">一键预设</span>
               <span class="tag optional">可选</span>
             </div>
             <div class="preset-row">
-              <button type="button" class="preset-btn" data-preset="default">🔄 恢复默认</button>
-              <button type="button" class="preset-btn" data-preset="anime">🎬 动漫视频 4x</button>
-              <button type="button" class="preset-btn" data-preset="meme">💬 表情包修复（不放大）</button>
-              <button type="button" class="preset-btn" data-preset="photo">📷 实拍 4x</button>
+              <button type="button" class="preset-btn" data-preset="default">恢复默认</button>
+              <button type="button" class="preset-btn" data-preset="anime">动漫视频 4x</button>
+              <button type="button" class="preset-btn" data-preset="meme">表情包修复（不放大）</button>
+              <button type="button" class="preset-btn" data-preset="photo">实拍 4x</button>
             </div>
           </div>
         </div>
@@ -469,11 +473,11 @@
             <div class="sec-head"><span class="sec-title" style="font-size: 0.84rem">样式</span><span class="tag optional">可选</span></div>
             <label class="switch-row">
               <input id="ascii-color" type="checkbox" />
-              <span>🎨 彩色<small>保留原像素颜色逐格着色</small></span>
+              <span>彩色<small>保留原像素颜色逐格着色</small></span>
             </label>
             <label class="switch-row">
               <input id="ascii-invert" type="checkbox" />
-              <span>🔄 反转梯度<small>勾选时自动交换底/字色（黑底白字↔白底黑字）</small></span>
+              <span>反转梯度<small>勾选时自动交换底/字色（黑底白字↔白底黑字）</small></span>
             </label>
             <div class="slider-line">
               <label style="font-size: 0.84rem">底色 <input id="ascii-bg-color" type="color" value="#000000" /></label>
@@ -555,7 +559,7 @@
         <p id="result-info"></p>
         <div id="loupe-panel">
           <div class="loupe-head">
-            <span>🔍 1:1 放大对比（左右同一区域，拖动移动观察点）</span>
+            <span>1:1 放大对比（左右同一区域，拖动移动观察点）</span>
             <div class="seg" id="loupe-zoom-group">
               <label><input type="radio" name="loupe-zoom" value="1" /><span>1x</span></label>
               <label><input type="radio" name="loupe-zoom" value="2" checked /><span>2x</span></label>
