@@ -152,15 +152,26 @@ export class AiEngine {
               session.outputNames[0],
               model.inputRange,
             );
-            if (!chk.ok) {
+            // 48px 通过不代表大尺寸行：部分驱动尺寸相关内核 bug 只在真实块尺寸暴露，再跑 192px
+            const chkBig = chk.ok
+              ? await AiEngine.warmupCheck(
+                  session,
+                  session.inputNames[0],
+                  session.outputNames[0],
+                  model.inputRange,
+                  192,
+                )
+              : { ok: false, detail: '' };
+            if (!chk.ok || !chkBig.ok) {
+              const detail = !chk.ok ? chk.detail : chkBig.detail;
               const last = cand.label === 'fp32' ? '回退 CPU 推理' : '尝试 fp32 WebGPU';
-              log('warn', `WebGPU ${cand.label} warmup 自检未通过（${chk.detail}）→ ${last}`);
+              log('warn', `WebGPU ${cand.label} warmup 自检未通过（${detail}）→ ${last}`);
               await session.release();
               session = null;
               ep = 'wasm';
               continue;
             }
-            log('gpu', `warmup 自检通过，GPU 推理可用（${chk.detail}）`);
+            log('gpu', `warmup 自检通过，GPU 推理可用（48px ${chk.detail}；192px ${chkBig.detail}）`);
             break;
           } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
@@ -199,8 +210,8 @@ export class AiEngine {
     inputName: string,
     outputName: string,
     inputRange: number,
+    S = 48,
   ): Promise<{ ok: boolean; detail: string }> {
-    const S = 48;
     const px = S * S;
     const grey = (0.5 * inputRange) as number;
     const chw = new Float32Array(3 * px).fill(grey);
@@ -300,7 +311,7 @@ export class AiEngine {
 
     if (!useTile) {
       let t = performance.now();
-      const out = await this.inferTensor(img.data, w, h);
+      const out = await this.inferTensor(img.data, w, h, `整图${w}x${h}`);
       const tRun = performance.now() - t;
       t = performance.now();
       const rgba = await this.chwToRgba(out.data, out.w, out.h);
@@ -345,7 +356,7 @@ export class AiEngine {
           patch.set(img.data.subarray(srcRow, srcRow + tw * 4), row * tw * 4);
         }
         let t = performance.now();
-        const outTile = await this.inferTensor(patch, tw, th);
+        const outTile = await this.inferTensor(patch, tw, th, `块(${sx},${sy})${tw}x${th}`);
         tRun += performance.now() - t;
         nTiles++;
 
@@ -419,6 +430,7 @@ export class AiEngine {
     rgba: Uint8ClampedArray,
     w: number,
     h: number,
+    where = '整图',
   ): Promise<{ data: Float32Array; w: number; h: number }> {
     const k = this.model.inputRange === 255 ? 1 : 1 / 255;
     const chw = new Float32Array(3 * w * h);
@@ -430,9 +442,20 @@ export class AiEngine {
     }
     const input = new ort.Tensor('float32', chw, [1, 3, h, w]);
     const feeds: Record<string, ort.Tensor> = { [this.inputName]: input };
-    const results = await this.session!.run(feeds);
-    const t = results[this.outputName];
-    return { data: t.data as Float32Array, w: t.dims[3], h: t.dims[2] };
+    // 坏块自检：部分驱动 WebGPU 下首块会静默返回全零/NaN（48px warmup 测不出尺寸相关问题），
+    // 必须按块验输出。输入全黑导致输出全零是合法的，只有"输入非空+输出异常"才判坏。
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const results = await this.session!.run(feeds);
+      const t = results[this.outputName];
+      const data = t.data as Float32Array;
+      const bad = findBadOutput(rgba, data, this.model.inputRange);
+      if (!bad) return { data, w: t.dims[3], h: t.dims[2] };
+      log('warn', `AI 推理输出异常（${where} ${w}x${h}，后端=${this._ep}，第 ${attempt + 1} 次：${bad}），重试`);
+    }
+    throw new Error(
+      `AI 推理输出异常（${where} ${w}x${h}，后端=${this._ep}）：输入非空但连续两次输出全零/非法值。` +
+        `可能是显卡驱动 WebGPU 实现问题，可换“算法增强”引擎，或把日志贴给开发者。`,
+    );
   }
 
   private async chwToRgba(data: Float32Array, w: number, h: number): Promise<Uint8ClampedArray<ArrayBuffer>> {
@@ -461,6 +484,37 @@ function toByte(v: number, range: number): number {
   if (v <= 0) return 0;
   if (v >= range) return 255;
   return (v / range) * 255;
+}
+
+/** 抽样验推理输出：返回异常描述，无异常返回 null。采样约 2000 点，开销可忽略。 */
+function findBadOutput(
+  rgba: Uint8ClampedArray,
+  data: Float32Array,
+  inputRange: number,
+): string | null {
+  const px = rgba.length / 4;
+  const step = Math.max(1, Math.floor(px / 700));
+  let inMax = 0;
+  for (let i = 0; i < px; i += step) {
+    const m = Math.max(rgba[i * 4], rgba[i * 4 + 1], rgba[i * 4 + 2]);
+    if (m > inMax) inMax = m;
+  }
+  if (inMax <= 8) return null; // 输入近乎全黑，输出全零合法，不判
+  const opx = data.length / 3;
+  const ostep = Math.max(1, Math.floor(opx / 700));
+  let outMax = 0;
+  for (let c = 0; c < 3; c++) {
+    const base = c * opx;
+    for (let i = 0; i < opx; i += ostep) {
+      const v = data[base + i];
+      if (!Number.isFinite(v)) return `输出含非有限值（通道 ${c}）`;
+      const a = Math.abs(v);
+      if (a > outMax) outMax = a;
+    }
+  }
+  if (outMax < inputRange * 1e-6) return `输入最亮 ${inMax} 但输出全零`;
+  if (outMax > inputRange * 100) return `输出爆炸（最大 ${outMax.toExponential(1)}）`;
+  return null;
 }
 
 /** 让出主线程一个宏任务：CPU 回退时长循环是纯 JS 计算，不让出会被浏览器判“页面无响应” */
