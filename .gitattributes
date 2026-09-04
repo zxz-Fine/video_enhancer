@@ -1,0 +1,9 @@
+# 模型权重与媒体：二进制，不做行尾转换与文本 diff
+*.onnx binary
+*.fp16 binary
+*.pth binary
+*.safetensors binary
+*.wasm binary
+*.mp4 binary
+*.png binary
+*.jpg binary
