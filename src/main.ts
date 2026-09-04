@@ -1,4 +1,5 @@
 import { enhanceVideo, probeVideo, type EnhanceResult, type ScaleFactor } from './enhance';
+import { enhanceImage } from './image';
 import { onLog, getLogs, log, type LogEntry } from './logger';
 import { asciiConvert, getAsciiCharset, type AsciiJobOptions, type AsciiOptions } from './ascii';
 
@@ -101,7 +102,22 @@ function setFile(file: File | null): void {
   }
   stopAsciiPreviewPlayback();
   if (file) {
-    log('info', `已选文件: ${file.name} (${(file.size / 1048576).toFixed(1)}MB, ${file.type || '未知类型'})`);
+    const sizeMb = (file.size / 1048576).toFixed(1);
+    log('info', `已选文件: ${file.name} (${file.size < 1048576 ? `${(file.size / 1024).toFixed(0)}KB` : `${sizeMb}MB`}, ${file.type || '未知类型'})`);
+    if (file.type.startsWith('image/')) {
+      // 图片：直接读尺寸，不走视频探针/ASCII 预览
+      createImageBitmap(file)
+        .then((bmp) => {
+          $('#file-meta').textContent = `${file.name} · ${bmp.width}×${bmp.height} · 图片`;
+          bmp.close();
+        })
+        .catch(() => {
+          $('#file-meta').textContent = `${file.name} · 图片（尺寸读取失败，仍可尝试处理）`;
+        });
+      controls.style.display = 'block';
+      startBtn.disabled = false;
+      return;
+    }
     asciiPreviewUrl = URL.createObjectURL(file);
     asciiPreviewVideo.src = asciiPreviewUrl;
     asciiPreviewSeek.value = '0';
@@ -210,20 +226,38 @@ for (const btn of document.querySelectorAll<HTMLButtonElement>('.ascii-preset'))
   });
 }
 
-function currentMode(): 'enhance' | 'ascii' {
+function currentMode(): 'enhance' | 'ascii' | 'image' {
   for (const r of document.querySelectorAll<HTMLInputElement>('input[name="category"]')) {
-    if (r.checked) return r.value as 'enhance' | 'ascii';
+    if (r.checked) return r.value as 'enhance' | 'ascii' | 'image';
   }
   return 'enhance';
 }
 
 for (const r of document.querySelectorAll<HTMLInputElement>('input[name="category"]')) {
   r.addEventListener('change', () => {
-    const ascii = currentMode() === 'ascii';
+    const mode = currentMode();
+    const ascii = mode === 'ascii';
+    const image = mode === 'image';
     enhanceOptions.style.display = ascii ? 'none' : 'block';
     asciiOptions.style.display = ascii ? 'block' : 'none';
+    $('#image-options').style.display = image ? 'block' : 'none';
+    // 图片无插帧/视频编码器
+    $('#interp-row').style.display = image ? 'none' : 'block';
+    $('#hw-row').style.display = image ? 'none' : 'block';
+    fileInput.accept = image ? 'image/*' : 'video/*';
     if (ascii) renderAsciiPreview();
     else stopAsciiPreviewPlayback();
+  });
+}
+
+const jpegQuality = $('#jpeg-quality') as HTMLInputElement;
+jpegQuality.addEventListener('input', () => {
+  $('#jpeg-quality-value').textContent = jpegQuality.value;
+});
+for (const r of document.querySelectorAll<HTMLInputElement>('input[name="image-format"]')) {
+  r.addEventListener('change', () => {
+    const fmt = document.querySelector<HTMLInputElement>('input[name="image-format"]:checked')?.value ?? 'png';
+    $('#jpeg-quality-row').style.display = fmt === 'jpeg' ? 'block' : 'none';
   });
 }
 
@@ -377,6 +411,58 @@ startBtn.addEventListener('click', async () => {
       `, 锐度=${Math.round(sharpness * 100)}%, 插帧=${interpolation}, 硬件编码=${hwEncode ? '开' : '关'}`,
   );
 
+  if (mode === 'image') {
+    const format = (document.querySelector<HTMLInputElement>('input[name="image-format"]:checked')?.value ?? 'png') as 'png' | 'jpeg';
+    const jpegQ = Number(($('#jpeg-quality') as HTMLInputElement).value) / 100;
+    log('info', `图片任务参数: 引擎=${engine}, 格式=${format}${format === 'jpeg' ? `, 质量=${Math.round(jpegQ * 100)}` : ''}`);
+    try {
+      const imgRes = await enhanceImage(
+        { file: selectedFile, engine, scale, sharpness, aiKeepResolution, aiHalfInput, format, jpegQuality: jpegQ },
+        (phase) => {
+          statusText.textContent =
+            phase === 'decode' ? '解码图片中…' : phase === 'model' ? '初始化 AI 引擎…' : phase === 'infer' ? 'AI 增强中…' : '编码输出中…';
+          progressBar.style.width = phase === 'decode' ? '10%' : phase === 'model' ? '25%' : phase === 'infer' ? '60%' : '90%';
+          badge('none', phase === 'infer' ? '增强中…' : '处理中…', computeBadge);
+          badge('none', engine === 'fsr' ? '算法增强' : 'AI 引擎', engineBadge);
+        },
+        () => cancelFlag,
+      );
+      if (resultUrl) URL.revokeObjectURL(resultUrl);
+      if (originalUrl) URL.revokeObjectURL(originalUrl);
+      resultUrl = URL.createObjectURL(imgRes.blob);
+      originalUrl = URL.createObjectURL(selectedFile);
+      ($('#original-img') as HTMLImageElement).src = originalUrl;
+      ($('#enhanced-img') as HTMLImageElement).src = resultUrl;
+      downloadLink.href = resultUrl;
+      const baseName = selectedFile.name.replace(/\.[^.]+$/, '');
+      downloadLink.download = `${baseName}-enhanced.${format === 'jpeg' ? 'jpg' : 'png'}`;
+      downloadLink.textContent = `下载增强后的 ${format === 'jpeg' ? 'JPG' : 'PNG'}`;
+      resultInfo.textContent =
+        `输出 ${imgRes.width}×${imgRes.height} · 耗时 ${(imgRes.elapsedMs / 1000).toFixed(1)}s · ` +
+        `文件大小 ${(imgRes.blob.size / 1024).toFixed(0)} KB`;
+      log('info', `图片任务成功: ${imgRes.width}x${imgRes.height}, ${(imgRes.blob.size / 1024).toFixed(0)}KB`);
+      progressWrap.style.display = 'none';
+      $('#video-compare').style.display = 'none';
+      $('#image-compare').style.display = 'grid';
+      $('#loupe-panel').style.display = 'none';
+      resultSection.style.display = 'block';
+    } catch (err) {
+      progressWrap.style.display = 'none';
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg !== '已取消。') {
+        log('error', `图片任务失败: ${msg}`);
+        setError(msg);
+      } else {
+        log('warn', '图片任务已取消');
+      }
+    } finally {
+      running = false;
+      startBtn.disabled = !selectedFile;
+      cancelBtn.disabled = true;
+    }
+    return;
+  }
+
   try {
     const result: EnhanceResult = await enhanceVideo(
       { file: selectedFile, scale, sharpness, engine, aiKeepResolution, aiHalfInput, interpolation, hwEncode, mode, ascii },
@@ -429,7 +515,11 @@ startBtn.addEventListener('click', async () => {
       `${result.processedFrames} 帧 · 输出 ${result.width}×${result.height} · 耗时 ${secs}s · ` +
       `文件大小 ${(result.blob.size / 1048576).toFixed(1)} MB`;
     log('info', `任务成功: ${result.processedFrames} 帧 → ${result.width}x${result.height}, 耗时 ${secs}s, 输出 ${(result.blob.size / 1048576).toFixed(1)}MB`);
+    downloadLink.textContent = '下载增强后的 MP4';
     progressWrap.style.display = 'none';
+    $('#video-compare').style.display = 'grid';
+    $('#image-compare').style.display = 'none';
+    $('#loupe-panel').style.display = 'block';
     resultSection.style.display = 'block';
     resetLoupe();
   } catch (err) {

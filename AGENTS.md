@@ -18,6 +18,9 @@
 | imdn-x2 | 0-255 | 2x |
 | realesr-general-x4v3 | 0-1 | 4x |
 | realesr-animevideov3 | 0-1 | 4x |
+| realesrgan-anime6b-x4 | 0-1 | 4x |
+| realcugan-se-2x-denoise3 | 0-1 | 2x |
+| realcugan-se-2x-conservative | 0-1 | 2x |
 
 - 模型对奇数尺寸输入会 +2 padding，输出必须按张量真实 dims 处理后再缩放
 - fp16 变体必须用 `onnxconverter_common.float16.convert_float_to_float16(keep_io_types=True)` 生成（补 Cast 边界）；手改 initializer dtype 会导致 Conv 内外精度混杂，WebGPU EP 建会话失败回退 CPU

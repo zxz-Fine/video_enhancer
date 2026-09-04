@@ -379,6 +379,47 @@ if (Math.abs(asciiResult.dur - 8 / 30) > 0.05) {
   process.exitCode = 1;
 }
 
+// Image enhance: 合成 320x240 表情包式小图 → imdn-x2 (wasm) → 640x480 PNG 非黑
+const imageResult = await page.evaluate(async () => {
+  const canvas = document.createElement('canvas');
+  canvas.width = 320;
+  canvas.height = 240;
+  const ctx = canvas.getContext('2d');
+  const g = ctx.createLinearGradient(0, 0, 320, 240);
+  g.addColorStop(0, '#ff9a3c');
+  g.addColorStop(1, '#3c6eff');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 320, 240);
+  ctx.fillStyle = '#fff';
+  ctx.beginPath();
+  ctx.arc(160, 120, 60, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#000';
+  ctx.font = 'bold 40px monospace';
+  ctx.fillText('(>_<)', 110, 135);
+  const blob = await new Promise((r) => canvas.toBlob(r, 'image/png'));
+  const file = new File([blob], 'meme.png', { type: 'image/png' });
+  const { enhanceImage } = await import('/src/image.ts');
+  const res = await enhanceImage(
+    { file, engine: 'imdn-x2', scale: 1, sharpness: 0.6, format: 'png', aiForceWasm: true },
+    () => {},
+    () => false,
+  );
+  const bmp = await createImageBitmap(res.blob);
+  const off = new OffscreenCanvas(bmp.width, bmp.height);
+  off.getContext('2d').drawImage(bmp, 0, 0);
+  const d = off.getContext('2d').getImageData(0, 0, bmp.width, bmp.height).data;
+  let sum = 0;
+  for (let i = 0; i < d.length; i += 4 * 97) sum += d[i] + d[i + 1] + d[i + 2];
+  bmp.close();
+  return { w: res.width, h: res.height, size: res.blob.size, type: res.blob.type, luma: sum > 0 };
+});
+console.log('IMAGE imdn-x2:', imageResult);
+if (imageResult.w !== 640 || imageResult.h !== 480 || !imageResult.luma || imageResult.size < 5000) {
+  console.log('IMAGE TEST FAIL');
+  process.exitCode = 1;
+}
+
 // Interpolation x2 (RIFE) — 160x120、4 帧：RIFE CPU 推理是 e2e 最大耗时项，
 // 120 非 32 倍数可顺带覆盖 padding 修复路径
 const interpB64 = await page.evaluate(async () => {

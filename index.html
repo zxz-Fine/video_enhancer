@@ -175,6 +175,11 @@
                   >视频转 ASCII<small>字符画风格 · 纯算法 · 极快</small></span
                 >
               </label>
+              <label>
+                <input type="radio" name="category" value="image" /><span
+                  >图片增强<small>动漫插画 · 表情包修复 · 单图秒出</small></span
+                >
+              </label>
             </div>
           </div>
         </div>
@@ -203,6 +208,21 @@
                     >AI · 动漫增强<small>动漫/手绘视频专用 · 4x · 2.4MB · 轻量快速</small></span
                   >
                 </label>
+                <label>
+                  <input type="radio" name="engine" value="realesrgan-anime6b-x4" /><span
+                    >AI · 插画 4x<small>动漫插画/静图 · 4x · 17.5MB · 细节最强</small></span
+                  >
+                </label>
+                <label>
+                  <input type="radio" name="engine" value="realcugan-se-2x-denoise3" /><span
+                    >AI · 表情包修复<small>渣清重压缩图 · 2x · 4.9MB · 强降噪</small></span
+                  >
+                </label>
+                <label>
+                  <input type="radio" name="engine" value="realcugan-se-2x-conservative" /><span
+                    >AI · 温和修复<small>较清晰原图 · 2x · 4.9MB · 保纹理</small></span
+                  >
+                </label>
             </div>
           </div>
         </div>
@@ -226,7 +246,7 @@
           <div class="control-group">
             <label class="group-label">锐化强度：<span id="sharpness-value">60%</span></label>
             <input id="sharpness" type="range" min="0" max="100" value="60" />
-            <div style="margin-top: 10px">
+            <div style="margin-top: 10px" id="interp-row">
               <label class="group-label">插帧（RIFE · 独立显存约 19MB）</label>
               <div class="radio-group" id="interp-group">
                 <label>
@@ -240,7 +260,7 @@
                 </label>
               </div>
             </div>
-            <div style="margin-top: 10px">
+            <div style="margin-top: 10px" id="hw-row">
               <label class="group-label">编码器</label>
               <label style="font-size: 0.85rem; cursor: pointer; user-select: none; display: block">
                 <input id="hw-encode" type="checkbox" checked />
@@ -318,6 +338,25 @@
             <small style="color: var(--muted)">预览即最终效果；正式转换按同样参数处理全片并编码</small>
           </div>
         </div>
+        <div id="image-options" style="display: none">
+          <div class="control-row">
+            <div class="control-group">
+              <label class="group-label">输出格式</label>
+              <div class="radio-group" id="image-format-group">
+                <label><input type="radio" name="image-format" value="png" checked /><span>PNG<small>无损 · 体积大</small></span></label>
+                <label><input type="radio" name="image-format" value="jpeg" /><span>JPEG<small>有损 · 体积小</small></span></label>
+              </div>
+            </div>
+            <div class="control-group" id="jpeg-quality-row" style="display: none">
+              <label class="group-label">JPEG 质量：<span id="jpeg-quality-value" style="color: var(--accent)">92</span></label>
+              <input id="jpeg-quality" type="range" min="60" max="100" value="92" />
+            </div>
+            <div class="control-group">
+              <label class="group-label">说明</label>
+              <small style="color: var(--muted)">输入长边超 2048px 先等比缩；输出超 4K 限幅。动漫/表情包建议 AI 引擎。</small>
+            </div>
+          </div>
+        </div>
         <div class="btn-row">
           <button id="start-btn">开始处理</button>
           <button id="cancel-btn" disabled>取消</button>
@@ -338,7 +377,7 @@
       <div id="error-box"></div>
 
       <div id="result-section">
-        <div class="compare">
+        <div class="compare" id="video-compare">
           <div class="cell">
             <div class="cap">原始视频</div>
             <video id="original-video" controls muted></video>
@@ -346,6 +385,16 @@
           <div class="cell">
             <div class="cap" id="enhanced-cap">增强后</div>
             <video id="enhanced-video" controls muted></video>
+          </div>
+        </div>
+        <div class="compare" id="image-compare" style="display: none">
+          <div class="cell">
+            <div class="cap">原始图片</div>
+            <img id="original-img" style="width: 100%; border-radius: 8px; background: #000; max-height: 420px; object-fit: contain" />
+          </div>
+          <div class="cell">
+            <div class="cap">增强后</div>
+            <img id="enhanced-img" style="width: 100%; border-radius: 8px; background: #000; max-height: 420px; object-fit: contain" />
           </div>
         </div>
         <p id="result-info"></p>
