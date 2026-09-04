@@ -2,6 +2,12 @@ import { chromium } from 'playwright-core';
 import { createServer } from 'vite';
 import fs from 'node:fs';
 
+// E2E_FAST=1：跳过三个最慢用例（FSR 4x / keepRes 分块 / RIFE x4），日常迭代 3 分钟内；
+// 合模型/改管线再跑全量。慢的原因：SwiftShader 纯软 WebGPU + wasm 单线程 CPU，
+// RIFE x4 与 4x 超分在这种环境是分钟级，真机 GPU 是秒级。
+const FAST = process.env.E2E_FAST === '1';
+if (FAST) console.log('FAST mode: skip scale-4x, keepRes-tiled, interp-x4');
+
 const exe = process.env.HOME + '/.cache/ms-playwright/chromium-1234/chrome-linux64/chrome';
 
 fs.mkdirSync('/tmp/opencode', { recursive: true });
@@ -109,7 +115,7 @@ const shortB64 = await page.evaluate(async () => {
   return btoa(bin);
 });
 
-for (const scale of [1, 2, 4]) {
+for (const scale of FAST ? [1, 2] : [1, 2, 4]) {
   const result = await page.evaluate(
     async ({ b64, scale }) => {
       const { enhanceVideo } = await import('/src/enhance.ts');
@@ -250,7 +256,10 @@ if (animeResult.w !== 1280 || animeResult.h !== 960 || animeResult.frames !== 8 
   process.exitCode = 1;
 }
 // AI keepResolution + 大于 768px 的源（走分块路径）：输出必须与源对齐而非撕裂回绕
-const keepResResult = await page.evaluate(
+// FAST 跳过：分块 wasm CPU 慢，全量再验
+const keepResResult = FAST
+  ? { w: 800, h: 400, frames: 4, mad: 0, skipped: true }
+  : await page.evaluate(
   async () => {
     const mb = await import('/node_modules/mediabunny/dist/modules/src/index.js');
     const canvas = document.createElement('canvas');
@@ -478,8 +487,10 @@ if (interpResult.packets < 7 || interpResult.packets > 10) {
   process.exitCode = 1;
 }
 
-// Interpolation x4：4 源帧 → 1 + 4*3 + 1 = 14 输出包
-const interp4Result = await page.evaluate(
+// Interpolation x4：4 源帧 → 1 + 4*3 + 1 = 14 输出包（FAST 跳过，RIFE CPU 最慢段）
+const interp4Result = FAST
+  ? { packets: 14, fpsOut: '120.0', skipped: true }
+  : await page.evaluate(
   async ({ b64 }) => {
     const { enhanceVideo } = await import('/src/enhance.ts');
     const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));

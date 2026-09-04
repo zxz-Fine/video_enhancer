@@ -9,6 +9,8 @@
 ## 测试
 
 - 修改着色器/AI 管线后运行：`npm run test:unit`（算法数值）、`npm run test:e2e`（浏览器端到端）
+  - 日常迭代用 `npm run test:e2e:fast`（跳过 FSR4x/keepRes 分块/RIFE x4 三个最慢用例，约 3 分钟；全量后台跑）
+  - UI 改动用 `npm run test:smoke`（id 存在性 + 预设联动 + 三模式截图，约 30 秒）
 - 新接入 AI 模型时必须跑 `tests/probe-model.mjs` 式灰色恒等探针确认输入范围约定（0-1 或 0-255，各模型不同）
 
 ## 已知模型约定

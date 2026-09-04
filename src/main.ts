@@ -189,6 +189,58 @@ engineRadios.forEach((r) => {
   });
 });
 
+// 一键预设：引擎 + 相关开关一键到位（触发 change 联动 UI 状态）
+for (const btn of document.querySelectorAll<HTMLButtonElement>('.preset-btn')) {
+  btn.addEventListener('click', () => {
+    const fire = (el: HTMLInputElement) => el.dispatchEvent(new Event('change', { bubbles: true }));
+    const setEngine = (v: string) => {
+      for (const r of engineRadios) {
+        if (r.value === v) {
+          r.checked = true;
+          fire(r);
+          break;
+        }
+      }
+    };
+    const setScale = (v: string) => {
+      for (const r of scaleRadios) if (r.value === v) r.checked = true;
+    };
+    const setInterp = (v: string) => {
+      for (const r of document.querySelectorAll<HTMLInputElement>('input[name="interp"]')) {
+        if (r.value === v) r.checked = true;
+      }
+    };
+    const preset = btn.dataset.preset ?? 'default';
+    if (preset === 'anime') {
+      setEngine('realesr-animevideov3');
+      aiKeepRes.checked = false;
+      halfInputEl.checked = false;
+      setInterp('none');
+    } else if (preset === 'meme') {
+      setEngine('realcugan-se-2x-denoise3');
+      halfInputEl.checked = false;
+      aiKeepRes.checked = true;
+      setInterp('none');
+    } else if (preset === 'photo') {
+      setEngine('realesr-general-x4v3');
+      aiKeepRes.checked = false;
+      halfInputEl.checked = false;
+      setInterp('none');
+    } else {
+      setEngine('fsr');
+      setScale('1');
+      sharpSlider.value = '60';
+      sharpValue.textContent = '60%';
+      aiKeepRes.checked = false;
+      halfInputEl.checked = false;
+      ($('#hw-encode') as HTMLInputElement).checked = true;
+      setInterp('none');
+    }
+    fire(aiKeepRes);
+    log('info', `已应用预设：${btn.textContent?.trim()}`);
+  });
+}
+
 // 性能模式与保持原分辨率互斥：半分辨率推理先缩小源，AI 修复再缩回，叠加等于双重抵消
 aiKeepRes.addEventListener('change', () => {
   if (aiKeepRes.checked) halfInputEl.checked = false;

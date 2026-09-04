@@ -7,80 +7,190 @@
     <title>本地视频画质增强器 — WebGPU</title>
     <style>
       :root {
-        --bg: #101418;
-        --panel: #1a2027;
-        --border: #2a333d;
+        --bg: #0c1014;
+        --bg-grad: radial-gradient(1200px 500px at 50% -10%, #16283f 0%, var(--bg) 60%);
+        --panel: #141b23;
+        --panel-2: #1a232e;
+        --border: #27313d;
+        --border-soft: #202933;
         --accent: #4f9cf9;
-        --text: #e6ebf0;
+        --accent-dim: #1c2b42;
+        --text: #e8eef4;
         --muted: #8a97a5;
+        --green: #5fe39a;
+        --amber: #ffb36b;
+        --radius: 14px;
       }
       * { box-sizing: border-box; }
       body {
         margin: 0;
-        font-family: 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
-        background: var(--bg);
+        font-family: 'PingFang SC', 'Microsoft YaHei', system-ui, -apple-system, sans-serif;
+        background: var(--bg-grad), var(--bg);
         color: var(--text);
         min-height: 100vh;
       }
-      .container { max-width: 960px; margin: 0 auto; padding: 32px 16px 64px; }
-      h1 { font-size: 1.6rem; margin: 0 0 8px; }
-      .subtitle { color: var(--muted); margin: 0 0 24px; font-size: 0.95rem; }
+      .container { max-width: 1020px; margin: 0 auto; padding: 36px 18px 72px; }
 
-      #drop-zone {
-        border: 2px dashed var(--border);
-        border-radius: 12px;
-        padding: 48px 24px;
-        text-align: center;
-        cursor: pointer;
-        transition: all 0.15s;
-        background: var(--panel);
+      /* ===== 页眉 ===== */
+      .hero { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 22px; }
+      .hero .logo {
+        width: 46px; height: 46px; border-radius: 13px; flex: none;
+        background: linear-gradient(135deg, #2b6fd4, #7cc4ff);
+        display: flex; align-items: center; justify-content: center; font-size: 1.5rem;
+        box-shadow: 0 6px 24px rgba(79, 156, 249, 0.35);
       }
+      .hero h1 { font-size: 1.45rem; margin: 0; letter-spacing: 0.02em; }
+      .hero .subtitle { color: var(--muted); margin: 6px 0 0; font-size: 0.88rem; }
+      .pill {
+        display: inline-flex; align-items: center; gap: 5px;
+        font-size: 0.72rem; font-weight: 600; padding: 3px 10px; border-radius: 999px;
+        border: 1px solid #1f5c3a; background: #12321f; color: var(--green);
+        margin-left: 8px; vertical-align: 2px;
+      }
+
+      /* ===== 步骤条 ===== */
+      .steps { display: flex; gap: 8px; margin-bottom: 20px; }
+      .step {
+        flex: 1; text-align: center; font-size: 0.78rem; color: var(--muted);
+        background: var(--panel); border: 1px solid var(--border-soft);
+        border-radius: 10px; padding: 8px 4px;
+      }
+      .step b { display: block; font-size: 0.95rem; color: var(--text); margin-bottom: 2px; }
+
+      .card {
+        background: var(--panel); border: 1px solid var(--border-soft);
+        border-radius: var(--radius); padding: 22px; margin-bottom: 16px;
+        box-shadow: 0 8px 28px rgba(0, 0, 0, 0.25);
+      }
+
+      /* ===== 文件区 ===== */
+      #drop-zone {
+        border: 2px dashed var(--border); border-radius: var(--radius);
+        padding: 44px 24px; text-align: center; cursor: pointer;
+        transition: all 0.15s; background: var(--panel);
+      }
+      #drop-zone:hover { border-color: var(--accent); }
       #drop-zone.dragover { border-color: var(--accent); background: #20304a; }
       #drop-zone .icon { font-size: 2rem; display: block; margin-bottom: 8px; }
-      #file-meta { margin: 16px 0 0; color: var(--muted); font-size: 0.9rem; word-break: break-all; }
+      #file-meta { margin: 14px 0 0; color: var(--muted); font-size: 0.88rem; word-break: break-all; }
 
-      #controls { display: none; margin-top: 20px; padding: 20px; background: var(--panel); border-radius: 12px; }
-      .control-row { display: flex; flex-wrap: wrap; gap: 24px; align-items: center; margin-bottom: 18px; }
-      .control-group label.group-label { display: block; font-size: 0.85rem; color: var(--muted); margin-bottom: 6px; }
-      .radio-group { display: flex; gap: 8px; }
-      .radio-group label {
-        padding: 8px 14px; border: 1px solid var(--border); border-radius: 8px;
-        cursor: pointer; font-size: 0.9rem; user-select: none;
+      /* ===== 分区标题 + 规则徽标 ===== */
+      .sec { margin-bottom: 20px; }
+      .sec:last-child { margin-bottom: 0; }
+      .sec-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+      .sec-num {
+        width: 22px; height: 22px; border-radius: 7px; flex: none;
+        background: var(--accent-dim); color: var(--accent);
+        font-size: 0.75rem; font-weight: 700;
+        display: inline-flex; align-items: center; justify-content: center;
       }
-      .radio-group input { display: none; }
-      .radio-group input:checked + span { color: var(--accent); font-weight: 600; }
-      .radio-group label:has(input:checked) { border-color: var(--accent); background: #1c2b42; }
-      .radio-group label small { display: block; color: var(--muted); font-size: 0.72rem; }
-
-      input[type='range'] { width: 220px; accent-color: var(--accent); }
-      #sharpness-value { color: var(--accent); font-variant-numeric: tabular-nums; }
-
-      .btn-row { display: flex; gap: 12px; }
-      button {
-        padding: 10px 22px; border: none; border-radius: 8px; font-size: 0.95rem;
-        cursor: pointer; font-family: inherit;
+      .sec-title { font-size: 0.92rem; font-weight: 700; }
+      .tag {
+        font-size: 0.7rem; font-weight: 600; padding: 2px 9px; border-radius: 999px;
+        border: 1px solid var(--border); color: var(--muted); background: var(--panel-2);
       }
-      button:disabled { opacity: 0.45; cursor: not-allowed; }
-      #start-btn { background: var(--accent); color: #fff; font-weight: 600; }
-      #cancel-btn { background: transparent; color: var(--text); border: 1px solid var(--border); }
+      .tag.single { border-color: #2b4a73; color: #7cc4ff; background: #16283f; }
+      .tag.optional { border-color: #5c4a1f; color: var(--amber); background: #2e2716; }
+      .tag.default { border-color: #1f5c3a; color: var(--green); background: #12321f; }
+      .tag.exclusive { border-color: #6e2f3a; color: #ff9aa4; background: #33181d; }
+      .sec-hint { font-size: 0.78rem; color: var(--muted); margin: -4px 0 10px 30px; }
 
-      #progress-wrap { display: none; margin-top: 20px; }
-      .badge-row { display: flex; gap: 10px; margin-bottom: 10px; }
+      /* ===== 选项卡片（单选） ===== */
+      .pick-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; }
+      .pick-grid.cols-3 { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+      .pick { position: relative; }
+      .pick input { position: absolute; opacity: 0; pointer-events: none; }
+      .pick .body {
+        display: block; height: 100%; padding: 12px 13px; cursor: pointer;
+        border: 1px solid var(--border); border-radius: 11px; background: var(--panel-2);
+        transition: border-color 0.12s, background 0.12s, transform 0.12s;
+      }
+      .pick .body:hover { border-color: #3b4a5c; transform: translateY(-1px); }
+      .pick input:checked + .body { border-color: var(--accent); background: #1c2b42; box-shadow: 0 0 0 1px var(--accent); }
+      .pick input:focus-visible + .body { outline: 2px solid var(--accent); outline-offset: 2px; }
+      .pick .name { font-size: 0.88rem; font-weight: 600; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+      .pick .desc { display: block; color: var(--muted); font-size: 0.74rem; margin-top: 4px; line-height: 1.45; }
+      .mini {
+        font-size: 0.66rem; font-weight: 700; padding: 1px 7px; border-radius: 999px;
+        background: var(--accent); color: #fff;
+      }
+      .mini.hot { background: #b3541e; }
+      .mini.new { background: #1f7a4d; }
+      .mini.save { background: #3a4a5e; }
+
+      /* 分段单选（短选项） */
+      .seg { display: flex; gap: 8px; flex-wrap: wrap; }
+      .seg label {
+        padding: 8px 16px; border: 1px solid var(--border); border-radius: 9px;
+        cursor: pointer; font-size: 0.86rem; user-select: none; background: var(--panel-2);
+      }
+      .seg label small { display: block; color: var(--muted); font-size: 0.7rem; }
+      .seg input { display: none; }
+      .seg label:has(input:checked) { border-color: var(--accent); background: #1c2b42; color: var(--text); font-weight: 600; }
+      .seg input:checked + span { color: var(--accent); }
+
+      /* 开关（可选功能） */
+      .switch-row {
+        display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px;
+        border: 1px solid var(--border-soft); border-radius: 10px; background: var(--panel-2);
+        margin-bottom: 8px; cursor: pointer; font-size: 0.85rem;
+      }
+      .switch-row:last-child { margin-bottom: 0; }
+      .switch-row input { appearance: none; -webkit-appearance: none; flex: none; width: 36px; height: 20px; margin: 1px 0 0; border-radius: 999px; background: #3a4552; position: relative; cursor: pointer; transition: background 0.15s; }
+      .switch-row input::after {
+        content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px;
+        border-radius: 50%; background: #fff; transition: left 0.15s;
+      }
+      .switch-row input:checked { background: var(--accent); }
+      .switch-row input:checked::after { left: 18px; }
+      .switch-row small { display: block; color: var(--muted); font-size: 0.74rem; margin-top: 2px; }
+
+      input[type='range'] { width: 230px; max-width: 100%; accent-color: var(--accent); }
+      .slider-line { display: flex; align-items: center; gap: 12px; font-size: 0.86rem; }
+      .slider-line b { color: var(--accent); font-variant-numeric: tabular-nums; }
+
+      /* 一键预设 */
+      .preset-row { display: flex; gap: 8px; flex-wrap: wrap; }
+      .preset-btn, .ascii-preset {
+        padding: 7px 14px; font-size: 0.8rem; background: var(--panel-2);
+        color: var(--text); border: 1px dashed #3b4a5c; border-radius: 9px; cursor: pointer;
+      }
+      .preset-btn:hover, .ascii-preset:hover { border-color: var(--accent); color: var(--accent); border-style: solid; }
+
+      .btn-row { display: flex; gap: 12px; align-items: center; margin-top: 4px; flex-wrap: wrap; }
+      button { font-family: inherit; }
+      #start-btn {
+        padding: 12px 34px; border: none; border-radius: 10px; font-size: 1rem;
+        background: linear-gradient(135deg, #2b6fd4, #4f9cf9); color: #fff; font-weight: 700; cursor: pointer;
+        box-shadow: 0 6px 20px rgba(79, 156, 249, 0.35);
+      }
+      #start-btn:hover:not(:disabled) { filter: brightness(1.1); }
+      #start-btn:disabled { opacity: 0.45; cursor: not-allowed; box-shadow: none; }
+      #cancel-btn {
+        padding: 12px 22px; border-radius: 10px; font-size: 0.92rem;
+        background: transparent; color: var(--text); border: 1px solid var(--border); cursor: pointer;
+      }
+      #cancel-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+      .run-hint { font-size: 0.76rem; color: var(--muted); }
+
+      /* ===== 进度 / 日志 ===== */
+      #progress-wrap { margin-top: 0; }
+      .badge-row { display: flex; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
       .badge {
-        padding: 6px 14px; border-radius: 20px; font-size: 0.85rem; font-weight: 600;
+        padding: 6px 14px; border-radius: 20px; font-size: 0.82rem; font-weight: 600;
         display: inline-flex; align-items: center; gap: 6px;
       }
       .badge.none { background: var(--border); color: var(--muted); }
-      .badge.gpu { background: #12321f; color: #5fe39a; border: 1px solid #1f5c3a; }
-      .badge.cpu { background: #3a2520; color: #ffb36b; border: 1px solid #7a5530; }
+      .badge.gpu { background: #12321f; color: var(--green); border: 1px solid #1f5c3a; }
+      .badge.cpu { background: #3a2520; color: var(--amber); border: 1px solid #7a5530; }
       .badge.model { background: #1c2b42; color: #7cc4ff; border: 1px solid #2b4a73; }
       .progress-track { height: 10px; background: var(--border); border-radius: 5px; overflow: hidden; }
       #progress-bar { height: 100%; width: 0%; background: linear-gradient(90deg, #4f9cf9, #7cc4ff); transition: width 0.2s; }
-      #status-text { margin-top: 8px; color: var(--muted); font-size: 0.9rem; }
+      #status-text { margin-top: 8px; color: var(--muted); font-size: 0.88rem; }
 
       #log-toggle {
-        margin-top: 12px; padding: 4px 12px; font-size: 0.8rem;
-        background: transparent; color: var(--muted); border: 1px solid var(--border); border-radius: 6px;
+        margin-top: 12px; padding: 4px 12px; font-size: 0.78rem;
+        background: transparent; color: var(--muted); border: 1px solid var(--border); border-radius: 6px; cursor: pointer;
       }
       #log-panel {
         display: none; margin-top: 8px; padding: 10px; height: 220px; overflow-y: auto;
@@ -90,43 +200,38 @@
       #log-panel.open { display: block; }
       #log-panel .lg-time { color: #55606c; margin-right: 8px; }
       #log-panel .lg-info { color: #9fb0c0; }
-      #log-panel .lg-gpu { color: #5fe39a; }
+      #log-panel .lg-gpu { color: var(--green); }
       #log-panel .lg-ai { color: #7cc4ff; }
-      #log-panel .lg-warn { color: #ffb36b; }
+      #log-panel .lg-warn { color: var(--amber); }
       #log-panel .lg-error { color: #ff8a94; }
 
       #error-box {
-        display: none; margin-top: 20px; padding: 12px 16px;
+        display: none; margin-top: 0; padding: 12px 16px;
         background: #3a1d20; border: 1px solid #7a3038; border-radius: 8px;
-        color: #ffb4ba; font-size: 0.92rem;
+        color: #ffb4ba; font-size: 0.9rem;
       }
 
-      #result-section { display: none; margin-top: 28px; }
-      #result-info { color: var(--muted); font-size: 0.9rem; margin-bottom: 14px; }
+      /* ===== 结果 ===== */
+      #result-section { margin-top: 0; }
+      #result-info { color: var(--muted); font-size: 0.88rem; margin-bottom: 14px; }
       .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-      .compare .cell video { width: 100%; border-radius: 8px; background: #000; max-height: 420px; }
-      .compare .cell .cap { font-size: 0.85rem; color: var(--muted); margin-bottom: 6px; }
+      .compare .cell video, .compare .cell img { width: 100%; border-radius: 8px; background: #000; max-height: 420px; }
+      .compare .cell img { object-fit: contain; }
+      .compare .cell .cap { font-size: 0.84rem; color: var(--muted); margin-bottom: 6px; }
       #loupe-panel { margin-top: 18px; }
-      .loupe-head { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
-      .loupe-head .group-label { margin: 0; }
+      .loupe-head { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; font-size: 0.84rem; color: var(--muted); }
       #loupe-canvas {
         width: 100%; display: block; background: #000;
         border: 1px solid var(--border); border-radius: 8px;
         cursor: grab; touch-action: none;
       }
       #loupe-canvas:active { cursor: grabbing; }
-      .loupe-hint { color: var(--muted); font-size: 0.8rem; margin: 6px 0 0; }
-      #loupe-play {
-        padding: 6px 14px; font-size: 0.85rem;
+      .loupe-hint { color: var(--muted); font-size: 0.78rem; margin: 6px 0 0; }
+      #loupe-play, #ascii-preview-play {
+        padding: 6px 14px; font-size: 0.84rem;
         background: transparent; color: var(--text);
-        border: 1px solid var(--border); border-radius: 6px;
+        border: 1px solid var(--border); border-radius: 6px; cursor: pointer;
       }
-      .ascii-preset {
-        padding: 4px 10px; font-size: 0.78rem;
-        background: transparent; color: var(--text);
-        border: 1px solid var(--border); border-radius: 6px;
-      }
-      .ascii-preset:hover { border-color: var(--accent); color: var(--accent); }
       #ascii-preview-canvas {
         width: 100%; display: block; background: #000;
         border: 1px solid var(--border); border-radius: 8px;
@@ -134,200 +239,249 @@
       }
       #ascii-preview-video { display: none; }
       #ascii-preview-seek { flex: 1; accent-color: var(--accent); }
-      #ascii-preview-play {
-        padding: 6px 14px; font-size: 0.85rem;
-        background: transparent; color: var(--text);
-        border: 1px solid var(--border); border-radius: 6px;
-      }
       #download-link {
         display: inline-block; margin-top: 18px; padding: 11px 26px;
-        background: var(--accent); color: #fff; text-decoration: none;
-        border-radius: 8px; font-weight: 600;
+        background: linear-gradient(135deg, #2b6fd4, #4f9cf9); color: #fff; text-decoration: none;
+        border-radius: 10px; font-weight: 700;
       }
-      @media (max-width: 640px) { .compare { grid-template-columns: 1fr; } }
+      .dimmed { opacity: 0.4; pointer-events: none; }
+      @media (max-width: 640px) { .compare { grid-template-columns: 1fr; } .steps { display: none; } }
     </style>
   </head>
   <body>
     <div class="container">
-      <h1>本地视频画质增强器</h1>
-      <p class="subtitle">WebGPU 加速 · CAS 锐化 / FSR 超分 / AI 修复 · RIFE 插帧 · ASCII 字符画 · 全程本地处理，文件不上传</p>
+      <div class="hero">
+        <div class="logo">🎬</div>
+        <div>
+          <h1>本地视频画质增强器<span class="pill">🔒 全程本地 · 不上传</span></h1>
+          <p class="subtitle">WebGPU 加速 · 锐化 / 超分 / AI 修复 / 插帧 / ASCII / 图片增强</p>
+        </div>
+      </div>
+
+      <div class="steps">
+        <div class="step"><b>1 · 选文件</b>拖入视频或图片</div>
+        <div class="step"><b>2 · 选功能</b>三选一</div>
+        <div class="step"><b>3 · 调参数</b>默认即用</div>
+        <div class="step"><b>4 · 运行</b>看日志下载</div>
+      </div>
 
       <div id="drop-zone">
-        <span class="icon">🎬</span>
-        点击选择或拖入视频文件<br />
-        <small style="color: var(--muted)">支持 MP4 / MOV / MKV / WEBM 等浏览器可解码格式</small>
+        <span class="icon">📥</span>
+        点击选择或拖入文件<br />
+        <small style="color: var(--muted)">视频：MP4 / MOV / MKV / WEBM · 图片：PNG / JPG / WEBP / GIF（首帧）</small>
       </div>
       <input id="file-input" type="file" accept="video/*" style="display: none" />
       <p id="file-meta"></p>
 
-      <div id="controls">
-        <div class="control-row">
-          <div class="control-group">
-            <label class="group-label">功能类别</label>
-            <div class="radio-group" id="category-group">
-              <label>
-                <input type="radio" name="category" value="enhance" checked /><span
-                  >画质增强<small>锐化 · 超分 · AI 修复 · 插帧</small></span
-                >
-              </label>
-              <label>
-                <input type="radio" name="category" value="ascii" /><span
-                  >视频转 ASCII<small>字符画风格 · 纯算法 · 极快</small></span
-                >
-              </label>
-              <label>
-                <input type="radio" name="category" value="image" /><span
-                  >图片增强<small>动漫插画 · 表情包修复 · 单图秒出</small></span
-                >
-              </label>
-            </div>
+      <div id="controls" class="card" style="display: none">
+        <div class="sec">
+          <div class="sec-head">
+            <span class="sec-num">1</span><span class="sec-title">功能</span>
+            <span class="tag single">三选一</span>
+          </div>
+          <div class="pick-grid cols-3" id="category-group">
+            <label class="pick">
+              <input type="radio" name="category" value="enhance" checked />
+              <span class="body">
+                <span class="name">✨ 画质增强 <span class="mini">默认</span></span>
+                <span class="desc">锐化 · 超分 · AI 修复 · 插帧，视频用这个</span>
+              </span>
+            </label>
+            <label class="pick">
+              <input type="radio" name="category" value="ascii" />
+              <span class="body">
+                <span class="name">🔤 视频转 ASCII</span>
+                <span class="desc">字符画风格 · 纯算法 · 极快免下载</span>
+              </span>
+            </label>
+            <label class="pick">
+              <input type="radio" name="category" value="image" />
+              <span class="body">
+                <span class="name">🖼️ 图片增强 <span class="mini new">新</span></span>
+                <span class="desc">动漫插画 · 表情包修复 · 单图秒出</span>
+              </span>
+            </label>
           </div>
         </div>
+
         <div id="enhance-options">
-        <div class="control-row">
-          <div class="control-group">
-            <label class="group-label">处理引擎</label>
-            <div class="radio-group" id="engine-group">
-              <label>
-                <input type="radio" name="engine" value="fsr" checked /><span
-                  >算法增强<small>CAS 锐化 / FSR 超分 · 不缩放可选</small></span
-                >
-              </label>
-              <label>
-                <input type="radio" name="engine" value="imdn-x2" /><span
-                  >AI · 极速增强<small>通用 · 2x · 0.4MB · 实时级速度</small></span
-                >
-              </label>
-              <label>
-                <input type="radio" name="engine" value="realesr-general-x4v3" /><span
-                  >AI · 通用 4x<small>真人/实拍 · 4.9MB · 低清实拍首选</small></span
-                >
-              </label>
-                <label>
-                  <input type="radio" name="engine" value="realesr-animevideov3" /><span
-                    >AI · 动漫增强<small>动漫/手绘视频专用 · 4x · 2.4MB · 轻量快速</small></span
-                  >
-                </label>
-                <label>
-                  <input type="radio" name="engine" value="realesrgan-anime6b-x4" /><span
-                    >AI · 插画 4x<small>动漫插画/静图 · 4x · 17.5MB · 细节最强</small></span
-                  >
-                </label>
-                <label>
-                  <input type="radio" name="engine" value="realcugan-se-2x-denoise3" /><span
-                    >AI · 表情包修复<small>渣清重压缩图 · 2x · 4.9MB · 强降噪</small></span
-                  >
-                </label>
-                <label>
-                  <input type="radio" name="engine" value="realcugan-se-2x-conservative" /><span
-                    >AI · 温和修复<small>较清晰原图 · 2x · 4.9MB · 保纹理</small></span
-                  >
-                </label>
+          <div class="sec">
+            <div class="sec-head">
+              <span class="sec-num">2</span><span class="sec-title">处理引擎</span>
+              <span class="tag single">多选一</span>
             </div>
-          </div>
-        </div>
-        <div class="control-row">
-          <div class="control-group" id="scale-group">
-            <label class="group-label">处理模式</label>
-            <div class="radio-group">
-              <label>
-                <input type="radio" name="scale" value="1" checked /><span
-                  >保持原分辨率<small>CAS 锐化修复</small></span
-                >
+            <div class="pick-grid cols-3" id="engine-group">
+              <label class="pick">
+                <input type="radio" name="engine" value="fsr" checked />
+                <span class="body">
+                  <span class="name">⚡ 算法增强 <span class="mini">默认 · 免下载</span></span>
+                  <span class="desc">CAS 锐化 / FSR 超分 · 最快，低清源轻度修复</span>
+                </span>
               </label>
-              <label>
-                <input type="radio" name="scale" value="2" /><span>2x<small>FSR 超分</small></span>
+              <label class="pick">
+                <input type="radio" name="engine" value="imdn-x2" />
+                <span class="body">
+                  <span class="name">AI · 极速增强 <span class="mini hot">0.4MB</span></span>
+                  <span class="desc">通用 · 2x · 实时级速度，高清源用它</span>
+                </span>
               </label>
-              <label>
-                <input type="radio" name="scale" value="4" /><span>4x<small>FSR 两级超分</small></span>
+              <label class="pick">
+                <input type="radio" name="engine" value="realesr-general-x4v3" />
+                <span class="body">
+                  <span class="name">AI · 通用 4x <span class="mini hot">4.9MB</span></span>
+                  <span class="desc">真人/实拍 · 低清实拍首选，带轻度降噪</span>
+                </span>
+              </label>
+              <label class="pick">
+                <input type="radio" name="engine" value="realesr-animevideov3" />
+                <span class="body">
+                  <span class="name">AI · 动漫增强 <span class="mini hot">2.4MB</span></span>
+                  <span class="desc">动漫/手绘视频专用 · 时域稳定不闪烁</span>
+                </span>
+              </label>
+              <label class="pick">
+                <input type="radio" name="engine" value="realesrgan-anime6b-x4" />
+                <span class="body">
+                  <span class="name">AI · 插画 4x</span>
+                  <span class="desc">动漫插画/静图 · 细节重建最强（图片模式首选）</span>
+                </span>
+              </label>
+              <label class="pick">
+                <input type="radio" name="engine" value="realcugan-se-2x-denoise3" />
+                <span class="body">
+                  <span class="name">AI · 表情包修复 <span class="mini new">去压缩</span></span>
+                  <span class="desc">渣清/重压缩小图 · 强降噪去 JPEG 伪影</span>
+                </span>
+              </label>
+              <label class="pick">
+                <input type="radio" name="engine" value="realcugan-se-2x-conservative" />
+                <span class="body">
+                  <span class="name">AI · 温和修复</span>
+                  <span class="desc">较清晰原图 · 保纹理不变色</span>
+                </span>
               </label>
             </div>
+            <p class="sec-hint" id="ai-note" style="display: none">AI 引擎自带放大倍数与锐化，锐度滑条不生效。</p>
           </div>
-          <div class="control-group">
-            <label class="group-label">锐化强度：<span id="sharpness-value">60%</span></label>
-            <input id="sharpness" type="range" min="0" max="100" value="60" />
-            <div style="margin-top: 10px" id="interp-row">
-              <label class="group-label">插帧（RIFE · 独立显存约 19MB）</label>
-              <div class="radio-group" id="interp-group">
-                <label>
-                  <input type="radio" name="interp" value="none" checked /><span>关闭</span>
-                </label>
-                <label>
-                  <input type="radio" name="interp" value="x2" /><span>2x 帧率</span>
-                </label>
-                <label>
-                  <input type="radio" name="interp" value="x4" /><span>4x 帧率<small>低帧率源适用</small></span>
-                </label>
+
+          <div class="sec">
+            <div class="sec-head">
+              <span class="sec-num">3</span><span class="sec-title">画面参数</span>
+              <span class="tag default">默认即用</span>
+            </div>
+            <p class="sec-hint">缩放与锐化仅算法引擎生效；AI 引擎看第 2 步自带倍数。</p>
+            <div class="sec-head" style="margin-top: 4px">
+              <span class="sec-title" style="font-size: 0.84rem">缩放</span>
+              <span class="tag single">多选一</span>
+            </div>
+            <div class="seg" id="scale-group" style="margin-bottom: 12px">
+              <label><input type="radio" name="scale" value="1" checked /><span>保持原分辨率<small>CAS 锐化修复</small></span></label>
+              <label><input type="radio" name="scale" value="2" /><span>2x<small>FSR 超分</small></span></label>
+              <label><input type="radio" name="scale" value="4" /><span>4x<small>FSR 两级超分</small></span></label>
+            </div>
+            <div class="slider-line" style="margin-bottom: 12px">
+              <span>锐化强度 <b id="sharpness-value">60%</b></span>
+              <input id="sharpness" type="range" min="0" max="100" value="60" />
+              <span class="tag default">默认 60</span>
+            </div>
+            <div id="interp-row">
+              <div class="sec-head" style="margin-top: 4px">
+                <span class="sec-title" style="font-size: 0.84rem">插帧（RIFE · 约 19MB 显存）</span>
+                <span class="tag single">多选一</span>
+                <span class="tag optional">可选 · 默认关</span>
+              </div>
+              <div class="seg" id="interp-group" style="margin-bottom: 12px">
+                <label><input type="radio" name="interp" value="none" checked /><span>关闭</span></label>
+                <label><input type="radio" name="interp" value="x2" /><span>2x 帧率</span></label>
+                <label><input type="radio" name="interp" value="x4" /><span>4x 帧率<small>低帧率源适用</small></span></label>
               </div>
             </div>
-            <div style="margin-top: 10px" id="hw-row">
-              <label class="group-label">编码器</label>
-              <label style="font-size: 0.85rem; cursor: pointer; user-select: none; display: block">
+          </div>
+
+          <div class="sec">
+            <div class="sec-head">
+              <span class="sec-num">4</span><span class="sec-title">加速与 AI 微调</span>
+              <span class="tag optional">可选</span>
+            </div>
+            <div id="hw-row">
+              <label class="switch-row">
                 <input id="hw-encode" type="checkbox" checked />
-                硬件编码加速（显卡固定功能编码单元 · 快数倍 · 同码率画质略降，取消勾选回退软件编码）
+                <span>🚀 硬件编码加速 <span class="tag default">默认开</span><small>显卡固定功能编码单元，快数倍 · 同码率画质略降 · 关了回退软件编码</small></span>
               </label>
             </div>
-            <small id="ai-note" style="display: none; color: var(--muted)"
-              >AI 引擎自带放大倍数与锐化，强度滑条不生效</small
-            >
-            <div id="ai-keep-res-row" style="display: none; margin-top: 8px">
-              <label style="font-size: 0.85rem; cursor: pointer; user-select: none">
+            <div id="ai-keep-res-row" style="display: none">
+              <label class="switch-row">
                 <input id="ai-keep-res" type="checkbox" />
-                保持原分辨率（AI 修复，不放大 · 编码更快）
+                <span>🎯 保持原分辨率<small>AI 只修复不放大 · 编码更快</small></span>
               </label>
-              <br />
-              <label style="font-size: 0.85rem; cursor: pointer; user-select: none">
+              <label class="switch-row">
                 <input id="ai-half-input" type="checkbox" />
-                性能模式（半分辨率推理 · 快约 4 倍 · 与"保持原分辨率"互斥）
+                <span>⏩ 性能模式<small>半分辨率推理 · 快约 4 倍 · 与上一项二选一（互斥）</small></span>
               </label>
+              <p class="sec-hint"><span class="tag exclusive">二选一</span> 保持原分辨率与性能模式互斥，勾一个会自动取消另一个。</p>
+            </div>
+          </div>
+
+          <div class="sec">
+            <div class="sec-head">
+              <span class="sec-title" style="font-size: 0.84rem">⚡ 一键预设</span>
+              <span class="tag optional">可选</span>
+            </div>
+            <div class="preset-row">
+              <button type="button" class="preset-btn" data-preset="default">🔄 恢复默认</button>
+              <button type="button" class="preset-btn" data-preset="anime">🎬 动漫视频 4x</button>
+              <button type="button" class="preset-btn" data-preset="meme">💬 表情包修复（不放大）</button>
+              <button type="button" class="preset-btn" data-preset="photo">📷 实拍 4x</button>
             </div>
           </div>
         </div>
-        </div>
+
         <div id="ascii-options" style="display: none">
-          <div class="control-row">
-            <div class="control-group">
-              <label class="group-label">字符列数：<span id="ascii-cols-value" style="color: var(--accent)">120</span></label>
+          <div class="sec">
+            <div class="sec-head">
+              <span class="sec-num">2</span><span class="sec-title">字符画参数</span>
+              <span class="tag default">默认即用</span>
+            </div>
+            <div class="slider-line" style="margin-bottom: 12px">
+              <span>字符列数 <b id="ascii-cols-value">120</b></span>
               <input id="ascii-cols" type="range" min="40" max="240" value="120" />
-              <div style="margin-top: 6px; display: flex; gap: 6px">
+              <span style="display: inline-flex; gap: 6px">
                 <button type="button" class="ascii-preset" data-cols="60">低 60</button>
                 <button type="button" class="ascii-preset" data-cols="130">中 130</button>
                 <button type="button" class="ascii-preset" data-cols="220">高 220</button>
-              </div>
+              </span>
             </div>
-            <div class="control-group">
-              <label class="group-label">字符集</label>
-              <div class="radio-group" id="ascii-charset-group">
-                <label><input type="radio" name="ascii-charset" value="classic" checked /><span>经典</span></label>
-                <label><input type="radio" name="ascii-charset" value="standard" /><span>细腻<small>70 级</small></span></label>
-                <label><input type="radio" name="ascii-charset" value="matrix" /><span>矩阵</span></label>
-                <label><input type="radio" name="ascii-charset" value="pixel" /><span>像素块</span></label>
-                <label><input type="radio" name="ascii-charset" value="circles" /><span>圆点</span></label>
-                <label><input type="radio" name="ascii-charset" value="braille" /><span>盲文点</span></label>
-                <label><input type="radio" name="ascii-charset" value="scanlines" /><span>扫描线</span></label>
-              </div>
-              <div style="margin-top: 8px">
-                <label class="group-label">暗部阈值：<span id="ascii-threshold-value" style="color: var(--accent)">0%</span></label>
-                <input id="ascii-threshold" type="range" min="0" max="60" value="0" />
-                <small style="display: block; color: var(--muted)">低于该亮度的格子留空，去除暗部噪点</small>
-              </div>
+            <div class="sec-head"><span class="sec-title" style="font-size: 0.84rem">字符集</span><span class="tag single">多选一</span></div>
+            <div class="seg" id="ascii-charset-group" style="margin-bottom: 12px">
+              <label><input type="radio" name="ascii-charset" value="classic" checked /><span>经典</span></label>
+              <label><input type="radio" name="ascii-charset" value="standard" /><span>细腻<small>70 级</small></span></label>
+              <label><input type="radio" name="ascii-charset" value="matrix" /><span>矩阵</span></label>
+              <label><input type="radio" name="ascii-charset" value="pixel" /><span>像素块</span></label>
+              <label><input type="radio" name="ascii-charset" value="circles" /><span>圆点</span></label>
+              <label><input type="radio" name="ascii-charset" value="braille" /><span>盲文点</span></label>
+              <label><input type="radio" name="ascii-charset" value="scanlines" /><span>扫描线</span></label>
             </div>
-            <div class="control-group">
-              <label class="group-label">样式</label>
-              <label style="display: block; font-size: 0.85rem; cursor: pointer; user-select: none">
-                <input id="ascii-color" type="checkbox" /> 彩色（保留原像素颜色）
-              </label>
-              <label style="display: block; font-size: 0.85rem; cursor: pointer; user-select: none">
-                <input id="ascii-invert" type="checkbox" /> 反转梯度（勾选时自动交换底/字色）
-              </label>
-              <div style="margin-top: 6px; display: flex; gap: 12px; align-items: center; font-size: 0.85rem">
-                <label>底色 <input id="ascii-bg-color" type="color" value="#000000" /></label>
-                <label>字色 <input id="ascii-fg-color" type="color" value="#ffffff" /></label>
-              </div>
+            <div class="slider-line" style="margin-bottom: 12px">
+              <span>暗部阈值 <b id="ascii-threshold-value">0%</b></span>
+              <input id="ascii-threshold" type="range" min="0" max="60" value="0" />
+              <small style="color: var(--muted)">低于该亮度的格子留空，去暗部噪点</small>
+            </div>
+            <div class="sec-head"><span class="sec-title" style="font-size: 0.84rem">样式</span><span class="tag optional">可选</span></div>
+            <label class="switch-row">
+              <input id="ascii-color" type="checkbox" />
+              <span>🎨 彩色<small>保留原像素颜色逐格着色</small></span>
+            </label>
+            <label class="switch-row">
+              <input id="ascii-invert" type="checkbox" />
+              <span>🔄 反转梯度<small>勾选时自动交换底/字色（黑底白字↔白底黑字）</small></span>
+            </label>
+            <div class="slider-line">
+              <label style="font-size: 0.84rem">底色 <input id="ascii-bg-color" type="color" value="#000000" /></label>
+              <label style="font-size: 0.84rem">字色 <input id="ascii-fg-color" type="color" value="#ffffff" /></label>
             </div>
           </div>
-          <div id="ascii-preview-wrap" style="margin-top: 14px">
-            <label class="group-label">实时预览（转换前先看效果，拖动进度条选观察点）</label>
+          <div class="sec">
+            <div class="sec-head"><span class="sec-title" style="font-size: 0.84rem">实时预览</span><span class="tag default">所见即所得</span></div>
             <canvas id="ascii-preview-canvas"></canvas>
             <div class="loupe-head" style="margin-top: 8px">
               <button id="ascii-preview-play" type="button">▶ 预览播放</button>
@@ -338,32 +492,33 @@
             <small style="color: var(--muted)">预览即最终效果；正式转换按同样参数处理全片并编码</small>
           </div>
         </div>
+
         <div id="image-options" style="display: none">
-          <div class="control-row">
-            <div class="control-group">
-              <label class="group-label">输出格式</label>
-              <div class="radio-group" id="image-format-group">
-                <label><input type="radio" name="image-format" value="png" checked /><span>PNG<small>无损 · 体积大</small></span></label>
-                <label><input type="radio" name="image-format" value="jpeg" /><span>JPEG<small>有损 · 体积小</small></span></label>
-              </div>
+          <div class="sec">
+            <div class="sec-head">
+              <span class="sec-num">2</span><span class="sec-title">输出格式</span>
+              <span class="tag single">二选一</span>
             </div>
-            <div class="control-group" id="jpeg-quality-row" style="display: none">
-              <label class="group-label">JPEG 质量：<span id="jpeg-quality-value" style="color: var(--accent)">92</span></label>
+            <div class="seg" id="image-format-group" style="margin-bottom: 12px">
+              <label><input type="radio" name="image-format" value="png" checked /><span>PNG<small>无损 · 体积大</small></span></label>
+              <label><input type="radio" name="image-format" value="jpeg" /><span>JPEG<small>有损 · 体积小</small></span></label>
+            </div>
+            <div class="slider-line" id="jpeg-quality-row" style="display: none; margin-bottom: 12px">
+              <span>JPEG 质量 <b id="jpeg-quality-value">92</b></span>
               <input id="jpeg-quality" type="range" min="60" max="100" value="92" />
             </div>
-            <div class="control-group">
-              <label class="group-label">说明</label>
-              <small style="color: var(--muted)">输入长边超 2048px 先等比缩；输出超 4K 限幅。动漫/表情包建议 AI 引擎。</small>
-            </div>
+            <p class="sec-hint">引擎在上面第 2 步选：表情包→「表情包修复」，插画→「插画 4x」，照片→「通用 4x」。输入长边超 2048px 先等比缩，输出超 4K 限幅。</p>
           </div>
         </div>
+
         <div class="btn-row">
-          <button id="start-btn">开始处理</button>
+          <button id="start-btn">▶ 开始处理</button>
           <button id="cancel-btn" disabled>取消</button>
+          <span class="run-hint">默认参数直接点开始；处理中可在日志面板看进度</span>
         </div>
       </div>
 
-      <div id="progress-wrap">
+      <div id="progress-wrap" class="card" style="display: none">
         <div class="badge-row">
           <span id="compute-badge" class="badge none">处理引擎状态</span>
           <span id="engine-badge" class="badge none"></span>
@@ -374,9 +529,9 @@
         <div id="log-panel"></div>
       </div>
 
-      <div id="error-box"></div>
+      <div id="error-box" class="card"></div>
 
-      <div id="result-section">
+      <div id="result-section" class="card" style="display: none">
         <div class="compare" id="video-compare">
           <div class="cell">
             <div class="cap">原始视频</div>
@@ -390,18 +545,18 @@
         <div class="compare" id="image-compare" style="display: none">
           <div class="cell">
             <div class="cap">原始图片</div>
-            <img id="original-img" style="width: 100%; border-radius: 8px; background: #000; max-height: 420px; object-fit: contain" />
+            <img id="original-img" />
           </div>
           <div class="cell">
             <div class="cap">增强后</div>
-            <img id="enhanced-img" style="width: 100%; border-radius: 8px; background: #000; max-height: 420px; object-fit: contain" />
+            <img id="enhanced-img" />
           </div>
         </div>
         <p id="result-info"></p>
         <div id="loupe-panel">
           <div class="loupe-head">
-            <label class="group-label">1:1 放大对比（左右为同一内容区域，拖动画面移动观察点）</label>
-            <div class="radio-group" id="loupe-zoom-group">
+            <span>🔍 1:1 放大对比（左右同一区域，拖动移动观察点）</span>
+            <div class="seg" id="loupe-zoom-group">
               <label><input type="radio" name="loupe-zoom" value="1" /><span>1x</span></label>
               <label><input type="radio" name="loupe-zoom" value="2" checked /><span>2x</span></label>
               <label><input type="radio" name="loupe-zoom" value="4" /><span>4x</span></label>
@@ -411,8 +566,7 @@
           </div>
           <canvas id="loupe-canvas" width="880" height="550"></canvas>
           <p class="loupe-hint">
-            放大倍数基于原始视频像素；增强侧按其更高源分辨率绘制，高频差异需在此视图观察。
-            整体缩略对比看不出效果是正常的——超分/锐化的增益都在像素级。
+            放大倍数基于原始视频像素；超分/锐化的增益都在像素级，缩略对比看不出是正常的。
           </p>
         </div>
         <a id="download-link" download>下载增强后的 MP4</a>
