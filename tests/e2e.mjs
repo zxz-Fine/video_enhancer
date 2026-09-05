@@ -525,6 +525,14 @@ await page.setInputFiles('#file-input', {
 });
 await page.waitForTimeout(800);
 
+// 汇总栏读真实文件尺寸（合成视频 320x240，FSR 保持原分辨率 → 输出同尺寸）
+const sumCheck = await page.evaluate(() => document.querySelector('#sum-box').textContent);
+console.log('UI summary:', sumCheck);
+if (!sumCheck.includes('320x240')) {
+  console.log('UI SUMMARY FAIL（汇总未使用真实文件尺寸）');
+  process.exitCode = 1;
+}
+
 // ASCII 预览：切换类别后预览画布应渲染出非全黑字符画
 await page.click('#category-group label:nth-child(2)');
 await page.waitForTimeout(1500);

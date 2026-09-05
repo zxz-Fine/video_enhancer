@@ -199,7 +199,10 @@ function setFile(file: File | null): void {
       createImageBitmap(file)
         .then((bmp) => {
           $('#file-meta').textContent = `${file.name} · ${bmp.width}×${bmp.height} · 图片`;
+          actualW = bmp.width;
+          actualH = bmp.height;
           bmp.close();
+          updateSummary();
         })
         .catch(() => {
           $('#file-meta').textContent = `${file.name} · 图片（尺寸读取失败，仍可尝试处理）`;
@@ -218,9 +221,15 @@ function setFile(file: File | null): void {
     v.onloadedmetadata = () => {
       URL.revokeObjectURL(v.src);
       $('#file-meta').textContent = `${file.name} · ${v.videoWidth}×${v.videoHeight} · ${(file.size / 1048576).toFixed(1)} MB`;
+      actualW = v.videoWidth;
+      actualH = v.videoHeight;
+      updateSummary();
     };
     probeVideo(file)
       .then((info) => {
+        actualW = info.width;
+        actualH = info.height;
+        updateSummary();
         const codecName = info.codec ?? '未知';
         $('#file-meta').textContent =
           `${file.name} · ${info.width}×${info.height} · ${(file.size / 1048576).toFixed(1)} MB · 编码 ${codecName}` +
@@ -238,6 +247,9 @@ function setFile(file: File | null): void {
     startBtn.disabled = false;
   } else {
     fileKind = null;
+    actualW = null;
+    actualH = null;
+    updateSummary();
     applyFileKind();
     $('#file-meta').textContent = '';
     controls.style.display = 'none';
@@ -362,53 +374,61 @@ for (const r of document.querySelectorAll<HTMLInputElement>('input[name="categor
   });
 }
 
-// 右侧当前配置汇总：假设输入 + 功能/引擎/输出/耗时，任何选项变动即刷新
+// 右侧当前配置汇总：基于已选文件的真实尺寸推算输出，无文件时显示横线
+let actualW: number | null = null;
+let actualH: number | null = null;
+
 function updateSummary(): void {
   const box = $('#sum-box');
   if (!box) return;
   const mode = currentMode();
   const eng = currentEngine();
-  const src = document.querySelector<HTMLInputElement>('input[name="sum-src"]:checked')?.value ?? '1920x1080';
-  const [sw, sh] = src.split('x').map(Number);
   const modeName = mode === 'ascii' ? '视频转 ASCII' : mode === 'image' ? '图片增强' : '画质增强';
   const engLabel =
     document.querySelector(`input[name="engine"][value="${eng}"]`)?.closest('label')?.querySelector('.name')
       ?.textContent?.trim() ?? eng;
-  let outText = `${sw}x${sh}`;
+  const inText = actualW && actualH ? `${actualW}x${actualH}` : '—';
+  let outText = '—';
   let outCls = '';
-  let timeText = '秒级';
-  if (mode === 'ascii') {
-    outText = `${sw}x${sh}（字符画）`;
-  } else {
-    let s: number;
-    if (eng === 'fsr') {
-      s = Number(document.querySelector<HTMLInputElement>('input[name="scale"]:checked')?.value ?? 1);
+  let timeText = '—';
+  if (actualW && actualH) {
+    const sw = actualW;
+    const sh = actualH;
+    timeText = '秒级';
+    if (mode === 'ascii') {
+      outText = `${sw}x${sh}（字符画）`;
     } else {
-      try {
-        s = getModel(eng).scale;
-      } catch {
-        s = 1;
+      let s: number;
+      if (eng === 'fsr') {
+        s = Number(document.querySelector<HTMLInputElement>('input[name="scale"]:checked')?.value ?? 1);
+      } else {
+        try {
+          s = getModel(eng).scale;
+        } catch {
+          s = 1;
+        }
       }
+      const keepRes = eng !== 'fsr' && aiKeepRes.checked;
+      let ow = sw * s;
+      let oh = sh * s;
+      let extra = '';
+      if (keepRes) {
+        ow = sw;
+        oh = sh;
+        extra = '（保持原分辨率）';
+      } else if (ow * oh > 3840 * 2160) {
+        const k = Math.min(3840 / ow, 2160 / oh);
+        ow = Math.round((ow * k) / 2) * 2;
+        oh = Math.round((oh * k) / 2) * 2;
+        extra = '（超 4K 已限幅）';
+      }
+      outText = `${ow}x${oh}${extra ? ` ${extra}` : ''}`;
+      outCls = extra ? 'warn' : '';
+      if (eng !== 'fsr') timeText = '分钟级（GPU）';
     }
-    const keepRes = eng !== 'fsr' && aiKeepRes.checked;
-    let ow = sw * s;
-    let oh = sh * s;
-    let extra = '';
-    if (keepRes) {
-      ow = sw;
-      oh = sh;
-      extra = '（保持原分辨率）';
-    } else if (ow * oh > 3840 * 2160) {
-      const k = Math.min(3840 / ow, 2160 / oh);
-      ow = Math.round((ow * k) / 2) * 2;
-      oh = Math.round((oh * k) / 2) * 2;
-      extra = '（超 4K 已限幅）';
-    }
-    outText = `${ow}x${oh}${extra ? ` ${extra}` : ''}`;
-    outCls = extra ? 'warn' : '';
-    if (eng !== 'fsr') timeText = '分钟级（GPU）';
   }
   const rows: [string, string, string][] = [
+    ['输入', inText, ''],
     ['功能', modeName, ''],
     ['引擎', engLabel, eng === 'fsr' ? 'ok' : 'warn'],
     ['输出', outText, outCls],

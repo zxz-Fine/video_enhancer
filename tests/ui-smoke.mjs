@@ -40,8 +40,15 @@ const back = await page.evaluate(() => ({
   sum: document.querySelector('#sum-box').textContent,
 }));
 console.log('back to video:', JSON.stringify(back));
-if (back.mode !== 'enhance' || !back.sum.includes('1920x1080')) {
+if (back.mode !== 'enhance' || !back.sum.includes('画质增强')) {
   console.log('BACK FAIL');
+  process.exitCode = 1;
+}
+// 无文件时汇总输入/输出显示横线（不许出现假设值）
+const nosrc = await page.evaluate(() => document.querySelector('#sum-box').textContent);
+console.log('summary no-file:', JSON.stringify(nosrc));
+if (!nosrc.includes('—')) {
+  console.log('SUMMARY NOSRC FAIL');
   process.exitCode = 1;
 }
 // ai-note 只在视频+AI 时出现，图片模式必须隐藏
