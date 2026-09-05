@@ -8,6 +8,7 @@ export interface LogEntry {
 
 const entries: LogEntry[] = [];
 const listeners = new Set<(e: LogEntry) => void>();
+const clearListeners = new Set<() => void>();
 
 export function log(level: LogLevel, msg: string): void {
   const e: LogEntry = {
@@ -25,6 +26,17 @@ export function log(level: LogLevel, msg: string): void {
 export function onLog(fn: (e: LogEntry) => void): () => void {
   listeners.add(fn);
   return () => listeners.delete(fn);
+}
+
+export function onClear(fn: () => void): () => void {
+  clearListeners.add(fn);
+  return () => clearListeners.delete(fn);
+}
+
+/** 新任务开始时清空，避免上次日志干扰 */
+export function clearLogs(): void {
+  entries.length = 0;
+  clearListeners.forEach((fn) => fn());
 }
 
 export function getLogs(): LogEntry[] {

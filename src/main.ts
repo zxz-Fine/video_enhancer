@@ -1,6 +1,6 @@
 import { enhanceVideo, probeVideo, type EnhanceResult, type ScaleFactor } from './enhance';
 import { enhanceImage } from './image';
-import { onLog, getLogs, log, type LogEntry } from './logger';
+import { onLog, onClear, getLogs, clearLogs, log, type LogEntry } from './logger';
 import { asciiConvert, getAsciiCharset, type AsciiJobOptions, type AsciiOptions } from './ascii';
 
 const $ = <T extends HTMLElement>(sel: string): T => {
@@ -75,10 +75,40 @@ function renderLog(e: LogEntry): void {
 
 onLog(renderLog);
 for (const e of getLogs()) renderLog(e);
+onClear(() => {
+  logPanel.innerHTML = '';
+});
 
 logToggle.addEventListener('click', () => {
   const open = logPanel.classList.toggle('open');
-  logToggle.textContent = open ? '▲ 收起日志' : '▼ 运行日志';
+  logToggle.textContent = open ? '收起' : '展开';
+});
+
+($('#log-copy') as HTMLButtonElement).addEventListener('click', async () => {
+  const text = getLogs()
+    .map((e) => `[${e.time}][${e.level}] ${e.msg}`)
+    .join('\n');
+  if (!text) {
+    log('warn', '日志为空，无可复制内容');
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    log('info', `日志已复制（${getLogs().length} 条）`);
+  } catch {
+    // 非安全上下文 clipboard 不可用时降级
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    try {
+      document.execCommand('copy');
+      log('info', `日志已复制（${getLogs().length} 条）`);
+    } catch {
+      log('error', '复制失败：浏览器拒绝剪贴板写入');
+    }
+    ta.remove();
+  }
 });
 
 let selectedFile: File | null = null;
@@ -96,6 +126,33 @@ function setError(msg: string | null): void {
 type FileKind = 'video' | 'image';
 let fileKind: FileKind | null = null;
 
+const VIDEO_ENGINES = ['fsr', 'imdn-x2', 'realesr-general-x4v3', 'realesr-animevideov3'];
+const IMAGE_ENGINES = ['realesrgan-anime6b-x4', 'realcugan-se-2x-denoise3', 'realcugan-se-2x-conservative'];
+const IMAGE_DEFAULT_ENGINE = 'realesrgan-anime6b-x4';
+
+// 预设依赖的引擎不在当前文件类型的可见组时，预设一并隐藏
+const PRESET_ENGINE: Record<string, string> = {
+  anime: 'realesr-animevideov3',
+  meme: 'realcugan-se-2x-denoise3',
+  photo: 'realesr-general-x4v3',
+};
+
+function visibleEngines(): string[] {
+  if (fileKind === 'image') return IMAGE_ENGINES;
+  if (fileKind === 'video') return VIDEO_ENGINES;
+  return [...VIDEO_ENGINES, ...IMAGE_ENGINES];
+}
+
+function selectEngine(v: string): void {
+  for (const r of engineRadios) {
+    if (r.value === v) {
+      r.checked = true;
+      r.dispatchEvent(new Event('change', { bubbles: true }));
+      break;
+    }
+  }
+}
+
 function isCategoryCompatible(value: string, kind: FileKind): boolean {
   return kind === 'image' ? value === 'image' : value !== 'image';
 }
@@ -112,9 +169,19 @@ function applyFileKind(): void {
       label?.removeAttribute('title');
     }
   }
-  // 动漫预设的价值在时域稳定，对单张图片无意义
-  const animePreset = document.querySelector<HTMLButtonElement>('[data-preset="anime"]');
-  if (animePreset) animePreset.style.display = fileKind === 'image' ? 'none' : '';
+  // 引擎组按文件类型过滤：图片只见图片引擎，视频只见视频引擎
+  $('#engine-video-group').style.display = fileKind === 'image' ? 'none' : 'block';
+  $('#engine-image-group').style.display = fileKind === 'video' ? 'none' : 'block';
+  if (fileKind && !visibleEngines().includes(currentEngine())) {
+    selectEngine(fileKind === 'image' ? IMAGE_DEFAULT_ENGINE : 'fsr');
+  }
+  // 图片引擎自带倍数与锐化，缩放/锐化/插帧整区无意义，隐藏并上移后续编号
+  $('#enhance-params').style.display = fileKind === 'image' ? 'none' : 'block';
+  $('#accel-sec-num').textContent = fileKind === 'image' ? '3' : '4';
+  for (const btn of document.querySelectorAll<HTMLButtonElement>('.preset-btn')) {
+    const dep = PRESET_ENGINE[btn.dataset.preset ?? ''];
+    btn.style.display = dep && fileKind && !visibleEngines().includes(dep) ? 'none' : '';
+  }
   if (fileKind && !isCategoryCompatible(currentMode(), fileKind)) {
     const target = fileKind === 'image' ? 'image' : 'enhance';
     document.querySelector<HTMLInputElement>(`input[name="category"][value="${target}"]`)?.click();
@@ -226,15 +293,6 @@ engineRadios.forEach((r) => {
 for (const btn of document.querySelectorAll<HTMLButtonElement>('.preset-btn')) {
   btn.addEventListener('click', () => {
     const fire = (el: HTMLInputElement) => el.dispatchEvent(new Event('change', { bubbles: true }));
-    const setEngine = (v: string) => {
-      for (const r of engineRadios) {
-        if (r.value === v) {
-          r.checked = true;
-          fire(r);
-          break;
-        }
-      }
-    };
     const setScale = (v: string) => {
       for (const r of scaleRadios) if (r.value === v) r.checked = true;
     };
@@ -245,22 +303,22 @@ for (const btn of document.querySelectorAll<HTMLButtonElement>('.preset-btn')) {
     };
     const preset = btn.dataset.preset ?? 'default';
     if (preset === 'anime') {
-      setEngine('realesr-animevideov3');
+      selectEngine('realesr-animevideov3');
       aiKeepRes.checked = false;
       halfInputEl.checked = false;
       setInterp('none');
     } else if (preset === 'meme') {
-      setEngine('realcugan-se-2x-denoise3');
+      selectEngine('realcugan-se-2x-denoise3');
       halfInputEl.checked = false;
       aiKeepRes.checked = true;
       setInterp('none');
     } else if (preset === 'photo') {
-      setEngine('realesr-general-x4v3');
+      selectEngine('realesr-general-x4v3');
       aiKeepRes.checked = false;
       halfInputEl.checked = false;
       setInterp('none');
     } else {
-      setEngine('fsr');
+      selectEngine(fileKind === 'image' ? IMAGE_DEFAULT_ENGINE : 'fsr');
       setScale('1');
       sharpSlider.value = '60';
       sharpValue.textContent = '60%';
@@ -479,7 +537,9 @@ startBtn.addEventListener('click', async () => {
   badge('none', '引擎初始化…', computeBadge);
   badge('none', '', engineBadge);
   logPanel.classList.add('open');
-  logToggle.textContent = '▲ 收起日志';
+  logToggle.textContent = '收起';
+  // 新任务清空上次日志，避免干扰
+  clearLogs();
 
   if (resultUrl) {
     URL.revokeObjectURL(resultUrl);

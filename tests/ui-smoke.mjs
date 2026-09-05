@@ -46,6 +46,25 @@ for (const v of ['ascii', 'image', 'enhance']) {
   console.log(`mode ${v}:`, JSON.stringify(vis));
 }
 await page.screenshot({ path: '/tmp/opencode/ui-new.png' });
+// 日志侧栏：复制按钮存在；清空后面板归零
+const logUi = await page.evaluate(async () => {
+  const hasCopy = !!document.querySelector('#log-copy');
+  const hasSide = !!document.querySelector('#log-side');
+  const mod = await import('/src/logger.ts');
+  mod.log('info', 'smoke-marker');
+  const before = document.querySelector('#log-panel').childElementCount;
+  mod.clearLogs();
+  const after = document.querySelector('#log-panel').childElementCount;
+  document.querySelector('#log-copy').click();
+  await new Promise((r) => setTimeout(r, 300));
+  const warned = [...document.querySelector('#log-panel').children].some((d) => d.textContent.includes('日志为空'));
+  return { hasCopy, hasSide, before, after, warned };
+});
+console.log('log ui:', JSON.stringify(logUi));
+if (!logUi.hasCopy || !logUi.hasSide || logUi.before < 1 || logUi.after !== 0 || !logUi.warned) {
+  console.log('LOG UI FAIL');
+  process.exitCode = 1;
+}
 console.log('pageerrors:', errs.length ? errs : 'none');
 await browser.close();
 await server.close();
