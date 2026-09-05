@@ -2,6 +2,7 @@ import { enhanceVideo, probeVideo, type EnhanceResult, type ScaleFactor } from '
 import { enhanceImage } from './image';
 import { onLog, onClear, getLogs, clearLogs, log, type LogEntry } from './logger';
 import { asciiConvert, getAsciiCharset, type AsciiJobOptions, type AsciiOptions } from './ascii';
+import { getModel } from './models';
 
 const $ = <T extends HTMLElement>(sel: string): T => {
   const el = document.querySelector(sel);
@@ -130,12 +131,7 @@ const VIDEO_ENGINES = ['fsr', 'imdn-x2', 'realesr-general-x4v3', 'realesr-animev
 const IMAGE_ENGINES = ['realesrgan-anime6b-x4', 'realcugan-se-2x-denoise3', 'realcugan-se-2x-conservative'];
 const IMAGE_DEFAULT_ENGINE = 'realesrgan-anime6b-x4';
 
-// 预设依赖的引擎不在当前文件类型的可见组时，预设一并隐藏
-const PRESET_ENGINE: Record<string, string> = {
-  anime: 'realesr-animevideov3',
-  meme: 'realcugan-se-2x-denoise3',
-  photo: 'realesr-general-x4v3',
-};
+// 预设已下线（蓝紫改版）：一键预设按钮组删除，相关逻辑同步移除
 
 function visibleEngines(): string[] {
   if (fileKind === 'image') return IMAGE_ENGINES;
@@ -178,10 +174,6 @@ function applyFileKind(): void {
   // 图片引擎自带倍数与锐化，缩放/锐化/插帧整区无意义，隐藏并上移后续编号
   $('#enhance-params').style.display = fileKind === 'image' ? 'none' : 'block';
   $('#accel-sec-num').textContent = fileKind === 'image' ? '3' : '4';
-  for (const btn of document.querySelectorAll<HTMLButtonElement>('.preset-btn')) {
-    const dep = PRESET_ENGINE[btn.dataset.preset ?? ''];
-    btn.style.display = dep && fileKind && !visibleEngines().includes(dep) ? 'none' : '';
-  }
   if (fileKind && !isCategoryCompatible(currentMode(), fileKind)) {
     const target = fileKind === 'image' ? 'image' : 'enhance';
     document.querySelector<HTMLInputElement>(`input[name="category"][value="${target}"]`)?.click();
@@ -286,51 +278,17 @@ engineRadios.forEach((r) => {
       : 'auto';
     $('#ai-note').style.display = ai ? 'inline' : 'none';
     aiKeepResRow.style.display = ai ? 'block' : 'none';
+    // 引擎归属联动模式：点图片引擎切图片模式，反之亦然（被锁定的类别点不动，自然无事）
+    const grp = r.closest('label')?.getAttribute('data-mode');
+    if (r.checked && grp) {
+      const target = grp === 'image' ? 'image' : 'enhance';
+      if (currentMode() !== target && currentMode() !== 'ascii') {
+        document.querySelector<HTMLInputElement>(`input[name="category"][value="${target}"]`)?.click();
+      }
+    }
+    updateSummary();
   });
 });
-
-// 一键预设：引擎 + 相关开关一键到位（触发 change 联动 UI 状态）
-for (const btn of document.querySelectorAll<HTMLButtonElement>('.preset-btn')) {
-  btn.addEventListener('click', () => {
-    const fire = (el: HTMLInputElement) => el.dispatchEvent(new Event('change', { bubbles: true }));
-    const setScale = (v: string) => {
-      for (const r of scaleRadios) if (r.value === v) r.checked = true;
-    };
-    const setInterp = (v: string) => {
-      for (const r of document.querySelectorAll<HTMLInputElement>('input[name="interp"]')) {
-        if (r.value === v) r.checked = true;
-      }
-    };
-    const preset = btn.dataset.preset ?? 'default';
-    if (preset === 'anime') {
-      selectEngine('realesr-animevideov3');
-      aiKeepRes.checked = false;
-      halfInputEl.checked = false;
-      setInterp('none');
-    } else if (preset === 'meme') {
-      selectEngine('realcugan-se-2x-denoise3');
-      halfInputEl.checked = false;
-      aiKeepRes.checked = true;
-      setInterp('none');
-    } else if (preset === 'photo') {
-      selectEngine('realesr-general-x4v3');
-      aiKeepRes.checked = false;
-      halfInputEl.checked = false;
-      setInterp('none');
-    } else {
-      selectEngine(fileKind === 'image' ? IMAGE_DEFAULT_ENGINE : 'fsr');
-      setScale('1');
-      sharpSlider.value = '60';
-      sharpValue.textContent = '60%';
-      aiKeepRes.checked = false;
-      halfInputEl.checked = false;
-      ($('#hw-encode') as HTMLInputElement).checked = true;
-      setInterp('none');
-    }
-    fire(aiKeepRes);
-    log('info', `已应用预设：${btn.textContent?.trim()}`);
-  });
-}
 
 // 性能模式与保持原分辨率互斥：半分辨率推理先缩小源，AI 修复再缩回，叠加等于双重抵消
 aiKeepRes.addEventListener('change', () => {
@@ -388,10 +346,75 @@ for (const r of document.querySelectorAll<HTMLInputElement>('input[name="categor
     $('#interp-row').style.display = image ? 'none' : 'block';
     $('#hw-row').style.display = image ? 'none' : 'block';
     fileInput.accept = image ? 'image/*' : 'video/*';
+    // 页签优先：切到图片补图片引擎，切回视频补算法引擎
+    if (image && !IMAGE_ENGINES.includes(currentEngine())) selectEngine(IMAGE_DEFAULT_ENGINE);
+    if (!image && !ascii && IMAGE_ENGINES.includes(currentEngine())) selectEngine('fsr');
     if (ascii) renderAsciiPreview();
     else stopAsciiPreviewPlayback();
+    updateSummary();
   });
 }
+
+// 右侧当前配置汇总：假设输入 + 功能/引擎/输出/耗时，任何选项变动即刷新
+function updateSummary(): void {
+  const box = $('#sum-box');
+  if (!box) return;
+  const mode = currentMode();
+  const eng = currentEngine();
+  const src = document.querySelector<HTMLInputElement>('input[name="sum-src"]:checked')?.value ?? '1920x1080';
+  const [sw, sh] = src.split('x').map(Number);
+  const modeName = mode === 'ascii' ? '视频转 ASCII' : mode === 'image' ? '图片增强' : '画质增强';
+  const engLabel =
+    document.querySelector(`input[name="engine"][value="${eng}"]`)?.closest('label')?.querySelector('.name')
+      ?.textContent?.trim() ?? eng;
+  let outText = `${sw}x${sh}`;
+  let outCls = '';
+  let timeText = '秒级';
+  if (mode === 'ascii') {
+    outText = `${sw}x${sh}（字符画）`;
+  } else {
+    let s: number;
+    if (eng === 'fsr') {
+      s = Number(document.querySelector<HTMLInputElement>('input[name="scale"]:checked')?.value ?? 1);
+    } else {
+      try {
+        s = getModel(eng).scale;
+      } catch {
+        s = 1;
+      }
+    }
+    const keepRes = eng !== 'fsr' && aiKeepRes.checked;
+    let ow = sw * s;
+    let oh = sh * s;
+    let extra = '';
+    if (keepRes) {
+      ow = sw;
+      oh = sh;
+      extra = '（保持原分辨率）';
+    } else if (ow * oh > 3840 * 2160) {
+      const k = Math.min(3840 / ow, 2160 / oh);
+      ow = Math.round((ow * k) / 2) * 2;
+      oh = Math.round((oh * k) / 2) * 2;
+      extra = '（超 4K 已限幅）';
+    }
+    outText = `${ow}x${oh}${extra ? ` ${extra}` : ''}`;
+    outCls = extra ? 'warn' : '';
+    if (eng !== 'fsr') timeText = '分钟级（GPU）';
+  }
+  const rows: [string, string, string][] = [
+    ['功能', modeName, ''],
+    ['引擎', engLabel, eng === 'fsr' ? 'ok' : 'warn'],
+    ['输出', outText, outCls],
+    ['耗时估计', timeText, ''],
+  ];
+  box.innerHTML = rows
+    .map(([k, v, c]) => `<div class="sum-row"><span class="k">${k}</span><span class="v ${c}">${v}</span></div>`)
+    .join('');
+}
+
+controls.addEventListener('change', updateSummary);
+controls.addEventListener('input', updateSummary);
+updateSummary();
 
 const jpegQuality = $('#jpeg-quality') as HTMLInputElement;
 jpegQuality.addEventListener('input', () => {

@@ -8,20 +8,20 @@
     <meta name="theme-color" content="#0b0e0c" />
     <title>本地视频画质增强器 - WebGPU</title>
     <style>
-      /* 色彩锁：单点缀色 --accent（薄荷绿），amber=警告/CPU，rose=错误/互斥，无蓝紫 */
+      /* 色彩锁：单点缀色 --accent（蓝紫），amber=警告/CPU，rose=错误/互斥 */
       /* 形状锁：容器 14 / 控件与媒体 10 / 徽标小方 4 / 胶囊 999 */
       :root {
         --bg: #0b0e0c;
-        --bg-ambient: radial-gradient(1100px 480px at 50% -120px, rgba(120, 231, 166, 0.055), transparent 65%);
+        --bg-ambient: radial-gradient(1100px 480px at 50% -120px, rgba(139, 124, 246, 0.07), transparent 65%);
         --panel: #111512;
         --panel-2: #171c18;
         --panel-3: #1d231e;
         --border: #2a332c;
         --border-soft: #212922;
-        --accent: #6fe3a0;
-        --accent-strong: #8ff0b8;
-        --accent-dim: #14261b;
-        --accent-border: #2c5a3e;
+        --accent: #8b7cf6;
+        --accent-strong: #b3a6ff;
+        --accent-dim: #1b1932;
+        --accent-border: #453d7d;
         --text: #e7ede9;
         --muted: #909b92;
         --amber: #e6b577;
@@ -30,7 +30,7 @@
         --rose: #ef9a9a;
         --rose-dim: #2a1a1c;
         --rose-border: #5c3438;
-        --ink: #07120c;
+        --ink: #0d0b1e;
         --radius-card: 14px;
         --radius-ctl: 10px;
         --font-ui: 'PingFang SC', 'Microsoft YaHei', system-ui, -apple-system, 'Segoe UI', sans-serif;
@@ -47,7 +47,7 @@
         min-height: 100dvh;
         -webkit-font-smoothing: antialiased;
       }
-      ::selection { background: rgba(111, 227, 160, 0.28); }
+      ::selection { background: rgba(139, 124, 246, 0.28); }
       :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
       button { font-family: inherit; }
       .container { max-width: 980px; margin: 0 auto; padding: 44px 20px 88px; }
@@ -168,16 +168,14 @@
       .slider-line { display: flex; align-items: center; gap: 12px; font-size: 0.86rem; flex-wrap: wrap; }
       .slider-line b { color: var(--accent); font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 
-      /* 一键预设 */
-      .preset-row { display: flex; gap: 8px; flex-wrap: wrap; }
-      .preset-btn, .ascii-preset {
+      .ascii-preset {
         padding: 7px 14px; font-size: 0.78rem; font-family: var(--font-mono);
         background: var(--panel-2); color: var(--text);
         border: 1px solid var(--border-soft); border-radius: var(--radius-ctl); cursor: pointer;
         transition: border-color 0.13s, color 0.13s;
       }
-      .preset-btn:hover, .ascii-preset:hover { border-color: var(--accent); color: var(--accent); }
-      .preset-btn:active, .ascii-preset:active { transform: translateY(1px); }
+      .ascii-preset:hover { border-color: var(--accent); color: var(--accent); }
+      .ascii-preset:active { transform: translateY(1px); }
 
       .btn-row { display: flex; gap: 12px; align-items: center; margin-top: 4px; flex-wrap: wrap; }
       #start-btn {
@@ -216,7 +214,18 @@
       .work-area { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; align-items: start; }
       .work-main { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
       .work-main .card { margin-bottom: 0; }
-      .log-side { position: sticky; top: 16px; max-height: calc(100vh - 32px); display: flex; flex-direction: column; }
+      .side-col { position: sticky; top: 16px; display: flex; flex-direction: column; gap: 16px;
+        max-height: calc(100vh - 32px); overflow-y: auto; min-width: 0; }
+      .side-col .card { margin-bottom: 0; }
+      .sum-row { display: flex; justify-content: space-between; gap: 10px; font-size: 0.82rem;
+        padding: 7px 0; border-bottom: 1px solid var(--border-soft); }
+      .sum-row:last-child { border-bottom: none; }
+      .sum-row .k { color: var(--muted); flex: none; }
+      .sum-row .v { font-weight: 650; text-align: right; }
+      .sum-row .v.warn { color: var(--amber); }
+      .sum-row .v.ok { color: var(--accent); }
+      #sum-src-group label { padding: 6px 12px; font-size: 0.78rem; }
+      .log-side { max-height: none; display: flex; flex-direction: column; }
       .log-side-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
       .log-side-head .sec-title { font-size: 0.9rem; font-weight: 700; }
       .log-side-btns { display: flex; gap: 8px; }
@@ -229,7 +238,7 @@
       .log-side #log-panel { flex: 1; min-height: 220px; max-height: calc(100vh - 140px); margin-top: 0; }
       @media (max-width: 900px) {
         .work-area { grid-template-columns: 1fr; }
-        .log-side { position: static; max-height: none; }
+        .side-col { position: static; max-height: none; overflow: visible; }
       }
       #log-toggle {
         margin-top: 12px; padding: 4px 12px; font-size: 0.76rem; font-family: var(--font-mono);
@@ -239,15 +248,15 @@
       #log-toggle:hover { color: var(--text); border-color: var(--border); }
       #log-panel {
         display: none; margin-top: 8px; padding: 10px 12px; height: 220px; overflow-y: auto;
-        background: #090c0a; border: 1px solid var(--border-soft); border-radius: var(--radius-ctl);
+        background: #0a0a10; border: 1px solid var(--border-soft); border-radius: var(--radius-ctl);
         font-family: var(--font-mono); font-size: 0.75rem; line-height: 1.55;
-        scrollbar-width: thin; scrollbar-color: #2e3730 transparent;
+        scrollbar-width: thin; scrollbar-color: #35324d transparent;
       }
       #log-panel.open { display: block; }
       #log-panel::-webkit-scrollbar { width: 8px; }
-      #log-panel::-webkit-scrollbar-thumb { background: #2e3730; border-radius: 999px; }
-      #log-panel .lg-time { color: #525c54; margin-right: 8px; }
-      #log-panel .lg-info { color: #9fb0a4; }
+      #log-panel::-webkit-scrollbar-thumb { background: #35324d; border-radius: 999px; }
+      #log-panel .lg-time { color: #55556a; margin-right: 8px; }
+      #log-panel .lg-info { color: #9fa0b8; }
       #log-panel .lg-gpu { color: var(--accent); }
       #log-panel .lg-ai { color: var(--accent-strong); }
       #log-panel .lg-warn { color: var(--amber); }
@@ -378,28 +387,28 @@
               <div id="engine-video-group">
                 <div class="sec-head mt-4"><span class="sec-title sub">视频</span></div>
                 <div class="pick-grid cols-3">
-                  <label class="pick">
+                  <label class="pick" data-mode="video">
                     <input type="radio" name="engine" value="fsr" checked />
                     <span class="body">
                       <span class="name">算法增强</span>
                       <span class="desc">CAS 锐化 / FSR 超分 · 免下载 · 低清源轻度修复</span>
                     </span>
                   </label>
-                  <label class="pick">
+                  <label class="pick" data-mode="video">
                     <input type="radio" name="engine" value="imdn-x2" />
                     <span class="body">
                       <span class="name">AI · 极速增强</span>
                       <span class="desc">通用 2x · 0.4MB · 实时级速度，高清源用它</span>
                     </span>
                   </label>
-                  <label class="pick">
+                  <label class="pick" data-mode="video">
                     <input type="radio" name="engine" value="realesr-general-x4v3" />
                     <span class="body">
                       <span class="name">AI · 通用 4x</span>
                       <span class="desc">真人/实拍 · 4.9MB · 低清实拍首选，带轻度降噪</span>
                     </span>
                   </label>
-                  <label class="pick">
+                  <label class="pick" data-mode="video">
                     <input type="radio" name="engine" value="realesr-animevideov3" />
                     <span class="body">
                       <span class="name">AI · 动漫增强</span>
@@ -411,21 +420,21 @@
               <div id="engine-image-group">
                 <div class="sec-head mt-4"><span class="sec-title sub">图片</span></div>
                 <div class="pick-grid cols-3">
-                  <label class="pick">
+                  <label class="pick" data-mode="image">
                     <input type="radio" name="engine" value="realesrgan-anime6b-x4" />
                     <span class="body">
                       <span class="name">AI · 插画 4x</span>
                       <span class="desc">动漫插画/静图 · 细节重建最强（图片模式首选）</span>
                     </span>
                   </label>
-                  <label class="pick">
+                  <label class="pick" data-mode="image">
                     <input type="radio" name="engine" value="realcugan-se-2x-denoise3" />
                     <span class="body">
                       <span class="name">AI · 表情包修复</span>
                       <span class="desc">渣清/重压缩小图 · 强降噪去 JPEG 伪影</span>
                     </span>
                   </label>
-                  <label class="pick">
+                  <label class="pick" data-mode="image">
                     <input type="radio" name="engine" value="realcugan-se-2x-conservative" />
                     <span class="body">
                       <span class="name">AI · 温和修复</span>
@@ -490,17 +499,6 @@
             </div>
           </div>
 
-          <div class="sec">
-            <div class="sec-head">
-              <span class="sec-title sub">一键预设</span>
-            </div>
-            <div class="preset-row">
-              <button type="button" class="preset-btn" data-preset="default">恢复默认</button>
-              <button type="button" class="preset-btn" data-preset="anime">动漫视频 4x</button>
-              <button type="button" class="preset-btn" data-preset="meme">表情包修复（不放大）</button>
-              <button type="button" class="preset-btn" data-preset="photo">实拍 4x</button>
-            </div>
-          </div>
         </div>
 
         <div id="ascii-options" style="display: none">
@@ -637,6 +635,17 @@
         <a id="download-link" download>下载增强后的 MP4</a>
       </div>
       </div>
+      <div class="side-col">
+      <div class="card" id="sum-card">
+        <div class="sec-head"><span class="sec-title">当前配置</span></div>
+        <div class="sec-head"><span class="sec-title sub">假设输入</span></div>
+        <div class="seg" id="sum-src-group">
+          <label><input type="radio" name="sum-src" value="1920x1080" checked /><span>1080p</span></label>
+          <label><input type="radio" name="sum-src" value="1280x720" /><span>720p</span></label>
+          <label><input type="radio" name="sum-src" value="500x500" /><span>表情包</span></label>
+        </div>
+        <div id="sum-box"></div>
+      </div>
       <aside class="log-side card" id="log-side">
         <div class="log-side-head">
           <span class="sec-title">运行日志</span>
@@ -647,6 +656,7 @@
         </div>
         <div id="log-panel" class="open"></div>
       </aside>
+      </div>
       </div>
     </div>
     <script type="module" src="/src/main.ts"></script>
