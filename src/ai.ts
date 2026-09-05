@@ -146,32 +146,35 @@ export class AiEngine {
             session = await create(await fetchModel(cand.file), ['webgpu']);
             ep = 'webgpu';
             log('gpu', `WebGPU 会话创建成功（${cand.label}）`);
-            const chk = await AiEngine.warmupCheck(
-              session,
-              session.inputNames[0],
-              session.outputNames[0],
-              model.inputRange,
-            );
-            // 48px 通过不代表大尺寸行：部分驱动尺寸相关内核 bug 只在真实块尺寸暴露，再跑 192px
-            const chkBig = chk.ok
-              ? await AiEngine.warmupCheck(
-                  session,
-                  session.inputNames[0],
-                  session.outputNames[0],
-                  model.inputRange,
-                  192,
-                )
-              : { ok: false, detail: '' };
-            if (!chk.ok || !chkBig.ok) {
-              const detail = !chk.ok ? chk.detail : chkBig.detail;
+            // 三档 warmup：48px 验基本正确性，192px 验中等尺寸，
+            // 满块尺寸（model.tile）验真实推理 regime。
+            // 某 Intel 驱动上 CUGAN 的 48/192 全过、752 首块确定性全零，
+            // 必须在加载期用满块拦住，否则任务中途抛错。
+            const sizes = [48, 192, model.tile ?? 768];
+            let failed = '';
+            for (const s of sizes) {
+              const chk = await AiEngine.warmupCheck(
+                session,
+                session.inputNames[0],
+                session.outputNames[0],
+                model.inputRange,
+                s,
+              );
+              log(chk.ok ? 'gpu' : 'warn', `warmup ${s}px：${chk.ok ? '通过' : '未通过'}（${chk.detail}）`);
+              if (!chk.ok) {
+                failed = `${s}px ${chk.detail}`;
+                break;
+              }
+            }
+            if (failed) {
               const last = cand.label === 'fp32' ? '回退 CPU 推理' : '尝试 fp32 WebGPU';
-              log('warn', `WebGPU ${cand.label} warmup 自检未通过（${detail}）→ ${last}`);
+              log('warn', `WebGPU ${cand.label} warmup 自检未通过（${failed}）→ ${last}`);
               await session.release();
               session = null;
               ep = 'wasm';
               continue;
             }
-            log('gpu', `warmup 自检通过，GPU 推理可用（48px ${chk.detail}；192px ${chkBig.detail}）`);
+            log('gpu', 'warmup 三档（48/192/满块）全通过，GPU 推理可用');
             break;
           } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
