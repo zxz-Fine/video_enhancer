@@ -276,7 +276,7 @@ engineRadios.forEach((r) => {
     (scaleGroup.style as CSSStyleDeclaration & { pointerEvents: string }).pointerEvents = ai
       ? 'none'
       : 'auto';
-    $('#ai-note').style.display = ai ? 'inline' : 'none';
+    refreshAiNote();
     aiKeepResRow.style.display = ai ? 'block' : 'none';
     // 引擎归属联动模式：点图片引擎切图片模式，反之亦然（被锁定的类别点不动，自然无事）
     const grp = r.closest('label')?.getAttribute('data-mode');
@@ -334,6 +334,12 @@ function currentMode(): 'enhance' | 'ascii' | 'image' {
   return 'enhance';
 }
 
+// 该提示只在视频模式 + AI 引擎时有意义（锐度滑条可见）；图片模式整组参数隐藏，不显示
+function refreshAiNote(): void {
+  const show = currentEngine() !== 'fsr' && currentMode() !== 'image';
+  $('#ai-note').style.display = show ? 'inline' : 'none';
+}
+
 for (const r of document.querySelectorAll<HTMLInputElement>('input[name="category"]')) {
   r.addEventListener('change', () => {
     const mode = currentMode();
@@ -349,6 +355,7 @@ for (const r of document.querySelectorAll<HTMLInputElement>('input[name="categor
     // 页签优先：切到图片补图片引擎，切回视频补算法引擎
     if (image && !IMAGE_ENGINES.includes(currentEngine())) selectEngine(IMAGE_DEFAULT_ENGINE);
     if (!image && !ascii && IMAGE_ENGINES.includes(currentEngine())) selectEngine('fsr');
+    refreshAiNote();
     if (ascii) renderAsciiPreview();
     else stopAsciiPreviewPlayback();
     updateSummary();

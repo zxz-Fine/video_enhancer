@@ -44,6 +44,19 @@ if (back.mode !== 'enhance' || !back.sum.includes('1920x1080')) {
   console.log('BACK FAIL');
   process.exitCode = 1;
 }
+// ai-note 只在视频+AI 时出现，图片模式必须隐藏
+const note = await page.evaluate(() => {
+  document.querySelector('input[name="engine"][value="realesr-general-x4v3"]').click();
+  const videoAi = getComputedStyle(document.querySelector('#ai-note')).display;
+  document.querySelector('input[name="category"][value="image"]').click();
+  const imageAi = getComputedStyle(document.querySelector('#ai-note')).display;
+  return { videoAi, imageAi };
+});
+console.log('ai-note:', JSON.stringify(note));
+if (note.videoAi === 'none' || note.imageAi !== 'none') {
+  console.log('AI-NOTE FAIL');
+  process.exitCode = 1;
+}
 // 三模式切换可见性
 for (const v of ['ascii', 'image', 'enhance']) {
   await page.evaluate((v) => {
