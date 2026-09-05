@@ -55,10 +55,15 @@ export class AiEngine {
   private capLogged = false;
   private _ep: 'webgpu' | 'wasm' = 'wasm';
 
-  private constructor(session: ort.InferenceSession, model: ModelInfo, ep: 'webgpu' | 'wasm') {
+  private constructor(
+    session: ort.InferenceSession,
+    model: ModelInfo,
+    ep: 'webgpu' | 'wasm',
+    tileOverride?: number | null,
+  ) {
     this.session = session;
     this.model = model;
-    this.tile = model.tile ?? 768;
+    this.tile = tileOverride ?? model.tile ?? 768;
     this._ep = ep;
     this.inputName = session.inputNames[0];
     this.outputName = session.outputNames[0];
@@ -124,6 +129,7 @@ export class AiEngine {
     onProgress('compile');
     let session: ort.InferenceSession | null = null;
     let ep: 'webgpu' | 'wasm' = 'wasm';
+    let tileOverride: number | null = null;
     let webgpuErr = '';
     if (opts?.forceWasm) {
       log('ai', '测试模式：强制 wasm 推理，跳过 WebGPU');
@@ -140,7 +146,9 @@ export class AiEngine {
               { file: model.file, label: 'fp32' },
             ]
           : [{ file: model.file, label: 'fp32' }];
+        // 跨候选保持：只有最终选中的候选的降块值有效
         for (const cand of candidates) {
+          tileOverride = null;
           try {
             log('ai', `尝试 WebGPU 推理（${cand.label} 模型）…`);
             session = await create(await fetchModel(cand.file), ['webgpu']);
@@ -148,9 +156,12 @@ export class AiEngine {
             log('gpu', `WebGPU 会话创建成功（${cand.label}）`);
             // 三档 warmup：48px 验基本正确性，192px 验中等尺寸，
             // 满块尺寸（model.tile）验真实推理 regime。
-            // 某 Intel 驱动上 CUGAN 的 48/192 全过、752 首块确定性全零，
-            // 必须在加载期用满块拦住，否则任务中途抛错。
-            const sizes = [48, 192, model.tile ?? 768];
+            // 某 Intel 驱动上 CUGAN 的 48/192 全过、768 确定性全零（fp16/fp32 同挂），
+            // 满块挂时再试半块：小尺寸能过则降块跑 GPU（tile 纯运行时参数，会话不用重建），
+            // 半块也挂才毙掉该候选。
+        const fullTile = model.tile ?? 768;
+            const halfTile = Math.floor(fullTile / 2);
+            const sizes = [48, 192, fullTile];
             let failed = '';
             for (const s of sizes) {
               const chk = await AiEngine.warmupCheck(
@@ -164,6 +175,22 @@ export class AiEngine {
               if (!chk.ok) {
                 failed = `${s}px ${chk.detail}`;
                 break;
+              }
+            }
+            if (failed && halfTile >= 256 && halfTile > 192) {
+              log('ai', `满块 ${fullTile}px 失败，试半块 ${halfTile}px（块数 x4，仍比 CPU 快则值）…`);
+              const chkHalf = await AiEngine.warmupCheck(
+                session,
+                session.inputNames[0],
+                session.outputNames[0],
+                model.inputRange,
+                halfTile,
+              );
+              log(chkHalf.ok ? 'gpu' : 'warn', `warmup ${halfTile}px：${chkHalf.ok ? '通过' : '未通过'}（${chkHalf.detail}）`);
+              if (chkHalf.ok) {
+                tileOverride = halfTile;
+                failed = '';
+                log('gpu', `降块跑 GPU：分块 ${fullTile}→${halfTile}px，坏块自检继续兜底`);
               }
             }
             if (failed) {
@@ -203,9 +230,9 @@ export class AiEngine {
     } else {
       log('gpu', `最终推理后端: GPU (WebGPU)`);
     }
-    log('ai', `引擎就绪: ${model.id}, 后端=${ep}, 总耗时 ${Math.round(performance.now() - t0)}ms`);
+    log('ai', `引擎就绪: ${model.id}, 后端=${ep}, 分块=${tileOverride ?? model.tile ?? 768}px, 总耗时 ${Math.round(performance.now() - t0)}ms`);
     onProgress('ready');
-    return new AiEngine(session, model, ep);
+    return new AiEngine(session, model, ep, tileOverride);
   }
 
   static async warmupCheck(
