@@ -163,6 +163,7 @@ export class AiEngine {
             const halfTile = Math.floor(fullTile / 2);
             const sizes = [48, 192, fullTile];
             let failed = '';
+            const passed: number[] = [];
             for (const s of sizes) {
               const chk = await AiEngine.warmupCheck(
                 session,
@@ -176,21 +177,31 @@ export class AiEngine {
                 failed = `${s}px ${chk.detail}`;
                 break;
               }
+              passed.push(s);
             }
-            if (failed && halfTile >= 256 && halfTile > 192) {
-              log('ai', `满块 ${fullTile}px 失败，试半块 ${halfTile}px（块数 x4，仍比 CPU 快则值）…`);
-              const chkHalf = await AiEngine.warmupCheck(
-                session,
-                session.inputNames[0],
-                session.outputNames[0],
-                model.inputRange,
-                halfTile,
-              );
-              log(chkHalf.ok ? 'gpu' : 'warn', `warmup ${halfTile}px：${chkHalf.ok ? '通过' : '未通过'}（${chkHalf.detail}）`);
-              if (chkHalf.ok) {
-                tileOverride = halfTile;
+            if (failed) {
+              // 降块策略：优先采纳本轮已通过的最大档（≥128，免重测；如 anime6b 直接用已验证的 192）；
+              // 否则现测半块（如 CUGAN 试 384）。tile 纯运行时参数，会话不用重建。坏块自检继续兜底。
+              const adopted = passed.filter((s) => s >= 128 && s < fullTile).pop();
+              if (adopted !== undefined) {
+                tileOverride = adopted;
                 failed = '';
-                log('gpu', `降块跑 GPU：分块 ${fullTile}→${halfTile}px，坏块自检继续兜底`);
+                log('gpu', `降块跑 GPU：分块 ${fullTile}→${adopted}px（本轮已验证），坏块自检继续兜底`);
+              } else if (halfTile >= 256) {
+                log('ai', `满块 ${fullTile}px 失败，试半块 ${halfTile}px（块数 x4，仍比 CPU 快则值）…`);
+                const chkHalf = await AiEngine.warmupCheck(
+                  session,
+                  session.inputNames[0],
+                  session.outputNames[0],
+                  model.inputRange,
+                  halfTile,
+                );
+                log(chkHalf.ok ? 'gpu' : 'warn', `warmup ${halfTile}px：${chkHalf.ok ? '通过' : '未通过'}（${chkHalf.detail}）`);
+                if (chkHalf.ok) {
+                  tileOverride = halfTile;
+                  failed = '';
+                  log('gpu', `降块跑 GPU：分块 ${fullTile}→${halfTile}px，坏块自检继续兜底`);
+                }
               }
             }
             if (failed) {
